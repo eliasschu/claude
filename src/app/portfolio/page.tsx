@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { EmptyState } from "@/components/ui/primitives";
 
-export const metadata: Metadata = { title: "Portfolio – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Portfolio – Der junge Kapitalist" };
 
 export default function PortfolioPage() {
   return (

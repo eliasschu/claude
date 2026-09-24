@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Card, CardBody, CardHeader } from "@/components/ui/primitives";
 
-export const metadata: Metadata = { title: "Datenquellen und Methodik – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Datenquellen und Methodik – Der junge Kapitalist" };
 
 const CONNECTED = [
   { area: "Aktienkurse (Intraday, aktuell)", source: "Twelve Data", env: "TWELVEDATA_API_KEY", note: "Gratistarif: 8 Abrufe/Minute, 800/Tag. Kein Bulk-Endpunkt – deshalb kuratierte Beobachtungsliste statt Top-500-Aktien." },

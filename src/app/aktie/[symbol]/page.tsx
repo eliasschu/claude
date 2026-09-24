@@ -23,7 +23,7 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { symbol } = await params;
   const overview = await getStockOverview(symbol.toUpperCase());
-  return { title: overview.ok ? `${overview.data.company.name} (${overview.data.listing.ticker}) – Finanzwelt-App` : "Wertpapier nicht gefunden" };
+  return { title: overview.ok ? `${overview.data.company.name} (${overview.data.listing.ticker}) – Der junge Kapitalist` : "Wertpapier nicht gefunden" };
 }
 
 const SECTIONS = [

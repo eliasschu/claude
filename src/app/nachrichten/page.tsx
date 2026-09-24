@@ -3,7 +3,7 @@ import { getNews, clusterNews } from "@/lib/services/news";
 import { newsToUiMeta } from "@/lib/data/types";
 import { NewsFeed } from "@/components/news/news-feed";
 
-export const metadata: Metadata = { title: "Nachrichten – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Nachrichten – Der junge Kapitalist" };
 
 export default async function NewsPage() {
   const result = await getNews([], 60);

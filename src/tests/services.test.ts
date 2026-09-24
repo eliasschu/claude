@@ -251,11 +251,25 @@ describe("Märkte", () => {
     assert.equal(card.changeBp, 5);
     assert.equal(card.changePct, null);
   });
-  test("Gold ohne Quelle: ehrlich nicht verfügbar, kein Ersatzwert", async () => {
+  test("Gold ohne Twelve-Data-Schlüssel: ehrlich nicht verfügbar, kein erfundener Wert", async () => {
     route([]);
     const card = await getMarketCard(marketBySlug("gold")!);
     assert.equal(card.status, "unavailable");
     assert.equal(card.value, null);
+    assert.equal(calls.length, 0, "ohne Schlüssel darf gar nicht erst angefragt werden");
+  });
+  test("Gold über den Ersatz-ETF GLD, klar als ETF-Kurs gekennzeichnet", async () => {
+    process.env.TWELVEDATA_API_KEY = "test-key";
+    route([(url) => url.includes("twelvedata") ? json({ symbol: "GLD", close: "245.10", previous_close: "243.00", currency: "USD", is_market_open: true }) : null]);
+    const card = await getMarketCard(marketBySlug("gold")!);
+    assert.equal(card.status, "ok");
+    assert.equal(card.value, 245.1);
+    assert.equal(card.tradingNote, "Ersatz-ETF-Kurs, kein Indexstand");
+  });
+  test("DAX bleibt ohne ETF-Ersatz ehrlich unverfügbar", async () => {
+    route([]);
+    const card = await getMarketCard(marketBySlug("dax")!);
+    assert.equal(card.status, "unavailable");
     assert.equal(calls.length, 0);
   });
 });

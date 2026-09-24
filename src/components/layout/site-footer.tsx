@@ -28,7 +28,7 @@ export function SiteFooter() {
           <Link href="/maerkte" className="hover:text-ink">
             Märkte
           </Link>
-          <span className="ml-auto">Finanzwelt-App</span>
+          <span className="ml-auto">Der junge Kapitalist</span>
         </div>
       </div>
     </footer>

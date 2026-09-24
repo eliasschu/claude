@@ -3,7 +3,7 @@
  * gegeneinander ausgetauscht:
  *   observedAt  – Zeitpunkt des Kurses, Messwerts oder Ereignisses
  *   publishedAt – Veroeffentlichung durch die Quelle
- *   fetchedAt   – letzter erfolgreicher Abruf durch Finanzwelt
+ *   fetchedAt   – letzter erfolgreicher Abruf durch Der junge Kapitalist
  * Ein frischer Abruf macht einen alten Kurs nicht aktuell.
  */
 

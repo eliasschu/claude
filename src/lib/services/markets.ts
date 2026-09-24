@@ -1,6 +1,7 @@
 import { MARKETS, type MarketDefinition } from "../../config/markets.ts";
 import type { DataMeta, FailureReason } from "../core/meta.ts";
 import { getBrent, getEurUsd, getUs10y, type DailySeries } from "../sources/macro.ts";
+import { getStockQuote } from "../sources/twelvedata.ts";
 import { getCryptoSnapshot } from "./crypto.ts";
 
 export interface MarketCard {
@@ -47,6 +48,17 @@ export async function getMarketCard(def: MarketDefinition): Promise<MarketCard> 
       spark: row.sparkline7d, sparkLabel: "letzte 7 Tage",
       meta: { ...snap.data.meta, observedAt: row.lastUpdated, sourceUrl: `https://www.coingecko.com/en/coins/${row.id}` },
       tradingNote: "Handel rund um die Uhr",
+    };
+  }
+  if (def.source === "twelvedata") {
+    if (!def.providerSymbol) return unavailable(def, "not_configured", "Kein Symbol hinterlegt.");
+    const q = await getStockQuote(def.providerSymbol);
+    if (!q.ok) return unavailable(def, q.reason, q.message);
+    if (q.data.price === null) return unavailable(def, "invalid", "Kein Kurs in der Antwort.");
+    return {
+      def, status: "ok", value: q.data.price, changeAbs: q.data.changeAbs, changePct: q.data.changePct, changeBp: null,
+      changeLabel: "gegenüber dem letzten Schlusskurs", spark: [], sparkLabel: "",
+      meta: q.meta, tradingNote: "Ersatz-ETF-Kurs, kein Indexstand",
     };
   }
   const load = def.source === "ecb" ? getEurUsd : def.source === "treasury" ? getUs10y : def.source === "eia" ? getBrent : null;

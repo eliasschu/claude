@@ -12,7 +12,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
   const detail = await getCryptoDetail(id);
-  return { title: detail.ok ? `${detail.data.detail.name} (${detail.data.detail.symbol}) – Finanzwelt-App` : "Nicht gefunden" };
+  return { title: detail.ok ? `${detail.data.detail.name} (${detail.data.detail.symbol}) – Der junge Kapitalist` : "Nicht gefunden" };
 }
 
 export default async function CryptoPage({ params }: Params) {

@@ -7,7 +7,7 @@ import { Delta } from "@/components/common/data";
 import { formatCompact, formatNumber } from "@/lib/finance/format";
 import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "Märkte – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Märkte – Der junge Kapitalist" };
 
 type SearchParams = { [key: string]: string | string[] | undefined };
 

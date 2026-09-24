@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { WatchlistView } from "@/components/watchlist/watchlist-view";
 
-export const metadata: Metadata = { title: "Watchlist – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Watchlist – Der junge Kapitalist" };
 
 export default function WatchlistPage() {
   return (

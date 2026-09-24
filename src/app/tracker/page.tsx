@@ -5,7 +5,7 @@ import { STOCK_MOVER_UNIVERSE } from "@/config/movers";
 import { Card, Chip } from "@/components/ui/primitives";
 import { formatCompact, formatDate } from "@/lib/finance/format";
 
-export const metadata: Metadata = { title: "Politiker- und Investorentracker – Finanzwelt-App" };
+export const metadata: Metadata = { title: "Politiker- und Investorentracker – Der junge Kapitalist" };
 
 const CATEGORY_LABEL: Record<string, { label: string; tone: "pos" | "neg" | "warn" | "neutral" }> = {
   kauf: { label: "Kauf", tone: "pos" },
