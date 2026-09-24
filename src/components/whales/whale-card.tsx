@@ -35,6 +35,13 @@ export async function WhaleCard({ profile, rows = 5 }: { profile: WhaleProfile; 
         US-Aktienbestand laut SEC-13F, {formatCompact(result.data.totalValueUsd, "USD")} gesamt
         {result.data.previousReportDate ? ` · Vergleich zu ${formatDate(result.data.previousReportDate)}` : ""}
       </p>
+      {profile.netWorth ? (
+        <p className="mt-1 text-[11px] text-muted">
+          Persönliches Vermögen laut Forbes: <span className="font-semibold text-ink">{formatCompact(profile.netWorth.usd, "USD")}</span>
+          {" "}(Stand {profile.netWorth.asOf}, kein Live-Wert) ·{" "}
+          <a href={profile.netWorth.sourceUrl} className="underline decoration-dotted underline-offset-2">Forbes ↗</a>
+        </p>
+      ) : null}
 
       <div className="mt-3">
         <AllocationBar slices={slices} totalUsd={result.data.totalValueUsd} />
