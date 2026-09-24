@@ -1,15 +1,14 @@
 import { Suspense } from "react";
 import { MarketRail } from "@/components/market/market-rail";
-import { TodayPanel } from "@/components/home/today-panel";
-import { CryptoTeaser } from "@/components/home/crypto-teaser";
-import { NewsSection } from "@/components/news/news-section";
+import { DealOfWeekSection } from "@/components/home/deal-of-week";
+import { DealsOfWeek } from "@/components/home/deals-of-week";
+import { Termine } from "@/components/home/termine";
+import { GrosseFischeTeaser } from "@/components/home/grosse-fische-teaser";
 import { MarketRailSkeleton, PanelSkeleton, ListSkeleton } from "@/components/home/skeletons";
 
 /**
  * Jeder Abschnitt ist eine eigene Suspense-Grenze: eine langsame oder
- * ausgefallene Datenquelle blockiert nie die ganze Seite. Kopf- und
- * Fußzeile (im Layout) sowie diese Hülle erscheinen sofort; jeder Block
- * lädt für sich mit eigenem Platzhalter nach.
+ * ausgefallene Datenquelle blockiert nie die ganze Seite.
  */
 export default function HomePage() {
   return (
@@ -19,16 +18,17 @@ export default function HomePage() {
       </Suspense>
 
       <Suspense fallback={<PanelSkeleton />}>
-        <TodayPanel />
+        <DealOfWeekSection />
       </Suspense>
 
       <Suspense fallback={<ListSkeleton />}>
-        <CryptoTeaser />
+        <DealsOfWeek />
       </Suspense>
 
-      <Suspense fallback={<ListSkeleton />}>
-        <NewsSection />
-      </Suspense>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <GrosseFischeTeaser />
+        <Termine />
+      </div>
     </div>
   );
 }
