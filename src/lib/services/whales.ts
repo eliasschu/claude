@@ -35,6 +35,15 @@ export async function getWhalePortfolio(profile: WhaleProfile): Promise<Result<W
   const company = await getCompany(profile.cik);
   if (!company.ok) return company;
 
+  const secName = company.data.name.toUpperCase();
+  if (!profile.nameHints.some((hint) => secName.includes(hint))) {
+    return fail(
+      "sec",
+      "invalid",
+      `CIK ${profile.cik} fuehrt bei der SEC zu "${company.data.name}", nicht zu ${profile.displayName}. Anzeige gesperrt, um keine falsch zugeordneten Daten zu zeigen.`,
+    );
+  }
+
   const quarterly = company.data.filings
     .filter((f) => f.form === "13F-HR" && f.reportDate)
     .sort((a, b) => (b.reportDate ?? "").localeCompare(a.reportDate ?? ""));

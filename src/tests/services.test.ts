@@ -255,7 +255,7 @@ describe("Große Fische (13F)", () => {
       (url) => url.endsWith("000106798326000005/infotable.xml") ? text(q2InfoTable) : null,
     ]);
 
-    const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, note: "" });
+    const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, nameHints: ["BERKSHIRE"], note: "" });
     if (!r.ok) throw new Error(r.message);
     assert.equal(r.data.reportDate, "2026-06-30");
     assert.equal(r.data.previousReportDate, "2026-03-31");
@@ -272,6 +272,18 @@ describe("Große Fische (13F)", () => {
     assert.equal(oldco.valueUsd, 0);
 
     assert.equal(r.data.totalValueUsd, (150000 + 8000) * 1000);
+  });
+
+  test("sperrt die Anzeige, wenn die CIK zu einer anderen Firma gehört als erwartet", async () => {
+    route([
+      (url) => url.includes("/submissions/CIK0001067983.json") ? json({
+        cik: "1067983", name: "Some Unrelated Corp", filings: { recent: {} },
+      }) : null,
+    ]);
+
+    const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, nameHints: ["BERKSHIRE"], note: "" });
+    assert.equal(r.ok, false);
+    if (!r.ok) assert.match(r.message, /Some Unrelated Corp/);
   });
 });
 

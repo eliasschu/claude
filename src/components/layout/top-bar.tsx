@@ -25,13 +25,12 @@ function Wordmark() {
 
 /**
  * Hauptnavigation mit Textbeschriftung - Symbole stehen nur zusaetzlich
- * daneben, nie als einziges Erkennungsmerkmal. "Große Fische" und "Deals"
- * fuehren vorlaeufig beide auf /tracker (die einzige echte Insider-Liste,
- * die es bisher gibt), bis die eigenen Seiten dafuer gebaut sind.
+ * daneben, nie als einziges Erkennungsmerkmal. "Deals" fuehrt vorlaeufig
+ * auf /tracker (die Insider-Liste), bis eine eigene Seite dafuer existiert.
  */
 const PRIMARY_NAV = [
   { href: "/", label: "Start", icon: null },
-  { href: "/tracker", label: "Große Fische", icon: Fish },
+  { href: "/grosse-fische", label: "Große Fische", icon: Fish },
   { href: "/tracker", label: "Deals", icon: TrendingUp },
   { href: "/maerkte", label: "Märkte", icon: LineChart },
   { href: "/watchlist", label: "Watchlist", icon: Bookmark },

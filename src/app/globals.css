@@ -43,6 +43,16 @@
   --demo: #7a5db8;
   --demo-soft: #f0ebfa;
 
+  /* Kategoriale Chart-Farben (Depot-Aufteilung u. ae.) - nie fuer Kursrichtung,
+     dafuer sind pos/neg reserviert. Reihenfolge fix, gegen Kontrast und
+     Farbfehlsichtigkeit geprueft (siehe dataviz-Skill). */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #4a3aa7;
+
   --shadow-card: 0 1px 2px rgb(22 33 30 / 0.05), 0 8px 24px -16px rgb(22 33 30 / 0.25);
 }
 
@@ -74,6 +84,13 @@
   --demo: #b79aff;
   --demo-soft: #241d38;
 
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #9085e9;
+
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -20px rgb(0 0 0 / 0.9);
 }
 
@@ -101,6 +118,13 @@
   --color-warn-soft: var(--warn-soft);
   --color-demo: var(--demo);
   --color-demo-soft: var(--demo-soft);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
 
   --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-serif: "Source Serif 4", ui-serif, Georgia, "Times New Roman", serif;
