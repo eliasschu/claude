@@ -57,10 +57,9 @@ export async function getMarketCard(def: MarketDefinition): Promise<MarketCard> 
   return cardFromDaily(def, r.data, r.meta, note);
 }
 
+/** Alle Markt-Kacheln unabhängig voneinander laden - eine langsame oder ausgefallene Quelle bremst die anderen nicht. */
 export async function getMarketOverview(): Promise<MarketCard[]> {
-  const cards: MarketCard[] = [];
-  for (const def of MARKETS) cards.push(await getMarketCard(def));
-  return cards;
+  return Promise.all(MARKETS.map((def) => getMarketCard(def)));
 }
 
 export async function getMarketSeries(def: MarketDefinition): Promise<{ series: DailySeries; meta: DataMeta } | null> {
