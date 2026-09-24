@@ -9,6 +9,7 @@ import { __resetHttpState } from "../lib/core/http.ts";
 import { __resetTickerCache } from "../lib/sources/sec.ts";
 import { getStockOverview } from "../lib/services/stocks.ts";
 import { getInsiderActivity } from "../lib/services/insider.ts";
+import { getWhalePortfolio } from "../lib/services/whales.ts";
 import { getNews } from "../lib/services/news.ts";
 import { getMarketCard } from "../lib/services/markets.ts";
 import { getCryptoRanking } from "../lib/services/crypto.ts";
@@ -217,6 +218,60 @@ describe("Insidermeldungen", () => {
     assert.equal(sale.fills.length, 2);
     // Anteil am Bestand: vor dem Verkauf hielt sie 3000 Aktien, 600 wurden verkauft.
     assert.ok(Math.abs(sale.shareOfHolding! - 0.2) < 0.001);
+  });
+});
+
+describe("Große Fische (13F)", () => {
+  test("vergleicht zwei Quartale und erkennt neue, erhöhte, reduzierte und geschlossene Positionen", async () => {
+    const q2InfoTable = `<informationTable>
+      <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>100000</value>
+        <shrsOrPrnAmt><sshPrnamt>1000000</sshPrnamt></shrsOrPrnAmt></infoTable>
+      <infoTable><nameOfIssuer>OLDCO INC</nameOfIssuer><cusip>111111111</cusip><value>5000</value>
+        <shrsOrPrnAmt><sshPrnamt>200000</sshPrnamt></shrsOrPrnAmt></infoTable>
+    </informationTable>`;
+    const q3InfoTable = `<informationTable>
+      <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>150000</value>
+        <shrsOrPrnAmt><sshPrnamt>1500000</sshPrnamt></shrsOrPrnAmt></infoTable>
+      <infoTable><nameOfIssuer>NEWCO INC</nameOfIssuer><cusip>222222222</cusip><value>8000</value>
+        <shrsOrPrnAmt><sshPrnamt>50000</sshPrnamt></shrsOrPrnAmt></infoTable>
+    </informationTable>`;
+
+    route([
+      (url) => url.includes("/submissions/CIK0001067983.json") ? json({
+        cik: "1067983", name: "Berkshire Hathaway Inc", filings: { recent: {
+          accessionNumber: ["0001067983-26-000009", "0001067983-26-000005"],
+          form: ["13F-HR", "13F-HR"], filingDate: ["2026-08-14", "2026-05-15"],
+          reportDate: ["2026-06-30", "2026-03-31"],
+          primaryDocument: ["primary_doc.xml", "primary_doc.xml"], items: ["", ""],
+        } },
+      }) : null,
+      (url) => url.endsWith("000106798326000009/index.json") ? json({ directory: { item: [
+        { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
+      ] } }) : null,
+      (url) => url.endsWith("000106798326000005/index.json") ? json({ directory: { item: [
+        { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
+      ] } }) : null,
+      (url) => url.endsWith("000106798326000009/infotable.xml") ? text(q3InfoTable) : null,
+      (url) => url.endsWith("000106798326000005/infotable.xml") ? text(q2InfoTable) : null,
+    ]);
+
+    const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, note: "" });
+    if (!r.ok) throw new Error(r.message);
+    assert.equal(r.data.reportDate, "2026-06-30");
+    assert.equal(r.data.previousReportDate, "2026-03-31");
+
+    const apple = r.data.holdings.find((h) => h.cusip === "037833100")!;
+    assert.equal(apple.change, "erhöht");
+    assert.equal(apple.previousShares, 1_000_000);
+
+    const newco = r.data.holdings.find((h) => h.cusip === "222222222")!;
+    assert.equal(newco.change, "neu");
+
+    const oldco = r.data.holdings.find((h) => h.cusip === "111111111")!;
+    assert.equal(oldco.change, "geschlossen");
+    assert.equal(oldco.valueUsd, 0);
+
+    assert.equal(r.data.totalValueUsd, (150000 + 8000) * 1000);
   });
 });
 

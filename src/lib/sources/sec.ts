@@ -2,6 +2,7 @@ import { env, upstream } from "../core/env.ts";
 import { fetchSource, parseJson, parseText, SourceError } from "../core/http.ts";
 import { fail, ok, type DataMeta, type Result } from "../core/meta.ts";
 import { filingUrls, normalizeSubmissions, normalizeTickerIndex, padCik, parseForm4, type ConceptFact, type Form4, type SecCompany, type SecListing } from "./parsers/sec.ts";
+import { findInfoTableFile, parse13FInfoTable, parseEdgarIndexJson, type ThirteenFHolding } from "./parsers/sec-13f.ts";
 
 function headers(): Record<string, string> {
   const ua = env.secUserAgent();
@@ -78,6 +79,36 @@ export async function getForm4(cik: number, accession: string, primaryDocument: 
     const res = await fetchSource({ ...COMMON, url: upstream(urls.rawXml), headers: headers(), revalidate: 7 * 86400, parse: parseText, retries: 1 });
     const parsed = parseForm4(res.value);
     return parsed ? { ...parsed, accession, filingDate, form, documentUrl: urls.document, indexUrl: urls.index } : null;
+  } catch (error) {
+    if (error instanceof SourceError && (error.reason === "not_found" || error.reason === "invalid")) return null;
+    throw error;
+  }
+}
+
+/** Ordnerindex einer Einreichung - listet alle enthaltenen Dateien (fuer 13F: Deckblatt + Informationstabelle). */
+export async function getFilingIndex(cik: number, accession: string): Promise<Result<{ name: string; type: string | null }[]>> {
+  try {
+    const folder = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession.replace(/-/g, "")}`;
+    const res = await fetchSource({ ...COMMON, url: upstream(`${folder}/index.json`), headers: headers(), revalidate: 7 * 86400, parse: parseJson, retries: 1 });
+    return ok(parseEdgarIndexJson(res.value), secMeta(res.fetchedAt, null, res.stale, res.staleReason));
+  } catch (error) {
+    return secFailure(error);
+  }
+}
+
+export interface ThirteenFRecord { holdings: ThirteenFHolding[]; accession: string; filingDate: string; reportDate: string | null; documentUrl: string }
+
+/** 13F-Informationstabelle: erst der Ordnerindex, dann die eigentliche Tabelle (liegt neben dem Deckblatt). */
+export async function getForm13F(cik: number, accession: string, primaryDocument: string, filingDate: string, reportDate: string | null): Promise<ThirteenFRecord | null> {
+  const index = await getFilingIndex(cik, accession);
+  if (!index.ok) return null;
+  const infoTableFile = findInfoTableFile(index.data, primaryDocument);
+  if (!infoTableFile) return null;
+  const urls = filingUrls(cik, accession, infoTableFile);
+  try {
+    const res = await fetchSource({ ...COMMON, url: upstream(urls.document), headers: headers(), revalidate: 7 * 86400, parse: parseText, retries: 1 });
+    const holdings = parse13FInfoTable(res.value);
+    return { holdings, accession, filingDate, reportDate, documentUrl: urls.document };
   } catch (error) {
     if (error instanceof SourceError && (error.reason === "not_found" || error.reason === "invalid")) return null;
     throw error;
