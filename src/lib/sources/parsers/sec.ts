@@ -145,24 +145,32 @@ export function latestSharesOutstanding(units: Record<string, ConceptFact[]> | u
 
 /* ---------------- Form 4 ---------------- */
 
-export type InsiderCategory = "kauf" | "verkauf" | "ausuebung" | "zuteilung" | "sonstige";
+/**
+ * Jeder SEC-Transaktionscode bekommt eine eigene, sprechende Kategorie -
+ * keine Sammelkategorie "Sonstige" mehr, ausser fuer den Code J, der von
+ * der SEC selbst als generische Restkategorie definiert ist.
+ */
+export type InsiderCategory =
+  | "kauf" | "verkauf" | "ausuebung" | "zuteilung" | "steuereinbehalt"
+  | "schenkung" | "rueckgabe" | "erbfall" | "planentscheidung" | "swap"
+  | "fruehmeldung" | "sonstige";
 
 export const TRANSACTION_CODES: Record<string, { label: string; category: InsiderCategory }> = {
   P: { label: "Kauf am offenen Markt oder privat", category: "kauf" },
   S: { label: "Verkauf am offenen Markt oder privat", category: "verkauf" },
   A: { label: "Zuteilung (z. B. Aktienvergütung)", category: "zuteilung" },
-  M: { label: "Ausübung oder Umwandlung eines Derivats", category: "ausuebung" },
+  M: { label: "Ausübung eines Derivats", category: "ausuebung" },
   X: { label: "Ausübung eines Derivats im Geld", category: "ausuebung" },
   O: { label: "Ausübung eines Derivats aus dem Geld", category: "ausuebung" },
   C: { label: "Umwandlung eines Derivats", category: "ausuebung" },
-  F: { label: "Einbehalt von Aktien zur Steuerzahlung", category: "sonstige" },
-  G: { label: "Schenkung", category: "sonstige" },
-  D: { label: "Rückgabe an den Emittenten", category: "sonstige" },
+  F: { label: "Einbehalt von Aktien zur Steuerzahlung", category: "steuereinbehalt" },
+  G: { label: "Schenkung oder Spende", category: "schenkung" },
+  D: { label: "Rückgabe an den Emittenten", category: "rueckgabe" },
   J: { label: "Sonstige Transaktion", category: "sonstige" },
-  W: { label: "Erwerb oder Abgabe durch Erbfall", category: "sonstige" },
-  I: { label: "Ermessensentscheidung in einem Plan", category: "sonstige" },
-  K: { label: "Equity Swap oder vergleichbares Geschäft", category: "sonstige" },
-  V: { label: "Freiwillig früh gemeldete Transaktion", category: "sonstige" },
+  W: { label: "Erwerb oder Abgabe durch Erbfall", category: "erbfall" },
+  I: { label: "Ermessensentscheidung in einem Plan", category: "planentscheidung" },
+  K: { label: "Equity Swap oder vergleichbares Geschäft", category: "swap" },
+  V: { label: "Freiwillig früh gemeldete Transaktion", category: "fruehmeldung" },
 };
 
 export interface InsiderOwner { cik: string | null; name: string; roles: string[] }

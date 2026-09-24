@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const RISK_NOTICE =
-  "Die dargestellten Informationen, Modellbewertungen und Analystenschätzungen dienen ausschließlich Informationszwecken und stellen keine Anlageberatung oder Empfehlung zum Kauf oder Verkauf von Finanzinstrumenten dar. Kapitalanlagen sind mit Risiken bis hin zum Totalverlust verbunden.";
+  "Die dargestellten Informationen, Modellbewertungen und Kennzahlen dienen ausschließlich Informationszwecken und stellen keine Anlageberatung oder Empfehlung zum Kauf oder Verkauf von Finanzinstrumenten dar. Der Wert von Kapitalanlagen kann schwanken; vergangene Entwicklungen sind kein verlässlicher Hinweis auf künftige.";
 
 export function SiteFooter() {
   return (

@@ -166,12 +166,57 @@ describe("Insidermeldungen", () => {
     route([secHandler]);
     const r = await getInsiderActivity(["TEST"], 90, 10, new Date("2026-09-23T10:00:00Z"));
     assert.equal(r.rows.length, 2);
-    const anna = r.rows.find((x) => x.owner === "Muster Anna")!;
+    const anna = r.rows.find((x) => x.owner === "Anna Muster")!;
     assert.equal(anna.delayDays, 2);
     assert.equal(anna.ageDays, 13);
     assert.equal(anna.value, 5000);
+    assert.equal(anna.role, "CEO");
+    assert.equal(anna.materiality, "hoch");
     assert.equal(r.clusters.length, 1);
-    assert.deepEqual(r.clusters[0].owners.sort(), ["Muster Anna", "Muster Bernd"]);
+    assert.deepEqual(r.clusters[0].owners.sort(), ["Anna Muster", "Bernd Muster"]);
+  });
+
+  test("entfernt die doppelte Ausübungszeile und fasst Teilverkäufe zusammen", async () => {
+    const exerciseXml = `<ownershipDocument><documentType>4</documentType>
+      <issuer><issuerCik>0000000099</issuerCik><issuerName>Exercise Corp</issuerName><issuerTradingSymbol>EXRC</issuerTradingSymbol></issuer>
+      <reportingOwner><reportingOwnerId><rptOwnerName>Muster Klara</rptOwnerName></reportingOwnerId><reportingOwnerRelationship><isOfficer>1</isOfficer><officerTitle>Chief Financial Officer</officerTitle></reportingOwnerRelationship></reportingOwner>
+      <nonDerivativeTable>
+        <nonDerivativeTransaction><securityTitle><value>Common Stock</value></securityTitle><transactionDate><value>2026-09-01</value></transactionDate>
+          <transactionCoding><transactionCode>M</transactionCode></transactionCoding>
+          <transactionAmounts><transactionShares><value>1000</value></transactionShares><transactionPricePerShare><value>0</value></transactionPricePerShare><transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+          <postTransactionAmounts><sharesOwnedFollowingTransaction><value>3000</value></sharesOwnedFollowingTransaction></postTransactionAmounts></nonDerivativeTransaction>
+        <nonDerivativeTransaction><securityTitle><value>Common Stock</value></securityTitle><transactionDate><value>2026-09-01</value></transactionDate>
+          <transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+          <transactionAmounts><transactionShares><value>400</value></transactionShares><transactionPricePerShare><value>60</value></transactionPricePerShare><transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode></transactionAmounts>
+          <postTransactionAmounts><sharesOwnedFollowingTransaction><value>2600</value></sharesOwnedFollowingTransaction></postTransactionAmounts></nonDerivativeTransaction>
+        <nonDerivativeTransaction><securityTitle><value>Common Stock</value></securityTitle><transactionDate><value>2026-09-01</value></transactionDate>
+          <transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+          <transactionAmounts><transactionShares><value>200</value></transactionShares><transactionPricePerShare><value>62</value></transactionPricePerShare><transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode></transactionAmounts>
+          <postTransactionAmounts><sharesOwnedFollowingTransaction><value>2400</value></sharesOwnedFollowingTransaction></postTransactionAmounts></nonDerivativeTransaction>
+      </nonDerivativeTable>
+      <derivativeTable><derivativeTransaction><securityTitle><value>Stock Option</value></securityTitle><transactionDate><value>2026-09-01</value></transactionDate>
+        <transactionCoding><transactionCode>M</transactionCode></transactionCoding>
+        <transactionAmounts><transactionShares><value>1000</value></transactionShares><transactionAcquiredDisposedCode><value>D</value></transactionAmounts></derivativeTransaction></derivativeTable></ownershipDocument>`;
+    route([
+      (url) => url.includes("company_tickers_exchange.json") ? json({ fields: ["cik", "name", "ticker", "exchange"], data: [[99, "Exercise Corp", "EXRC", "Nasdaq"]] }) : null,
+      (url) => url.includes("/submissions/CIK0000000099.json") ? json({ cik: "99", name: "Exercise Corp", filings: { recent: {
+        accessionNumber: ["0000000099-26-000001"], form: ["4"], filingDate: ["2026-09-03"], reportDate: ["2026-09-01"],
+        primaryDocument: ["xslF345X05/c.xml"], items: [""],
+      } } }) : null,
+      (url) => url.endsWith("/c.xml") ? text(exerciseXml) : null,
+    ]);
+    const r = await getInsiderActivity(["EXRC"], 90, 10, new Date("2026-09-10T10:00:00Z"));
+    // Die Ausübung darf nur einmal erscheinen (direkte Zeile), nicht zusätzlich als Derivat-Zeile.
+    const exercises = r.rows.filter((x) => x.category === "ausuebung");
+    assert.equal(exercises.length, 1);
+    assert.equal(exercises[0].table, "direkt");
+    // Die beiden Teilverkäufe (400 @ 60, 200 @ 62) werden zu einer Zeile zusammengefasst.
+    const sale = r.rows.find((x) => x.category === "verkauf")!;
+    assert.equal(sale.shares, 600);
+    assert.ok(Math.abs(sale.price! - 60.6667) < 0.01, "mengengewichteter Durchschnittspreis");
+    assert.equal(sale.fills.length, 2);
+    // Anteil am Bestand: vor dem Verkauf hielt sie 3000 Aktien, 600 wurden verkauft.
+    assert.ok(Math.abs(sale.shareOfHolding! - 0.2) < 0.001);
   });
 });
 
