@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   Finanzwelt-App – Designsystem
+   -----------------------------------------------------------------------------
+   Grundgedanke: Daten sind ruhig, Farbe ist knapp. Gruen und Rot sind
+   ausschliesslich fuer Kursrichtungen reserviert. Die Markenfarbe ist deshalb
+   ein Blauviolett, das nie eine Marktbewegung bedeuten kann.
+   ========================================================================== */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  /* Flaechen */
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --surface-2: #f8faf7;
+  --surface-3: #ecefea;
+  --border: #dfe4dd;
+  --border-strong: #c7cfc6;
+
+  /* Schrift */
+  --ink: #16211e;
+  --ink-muted: #5f6e69;
+  --ink-faint: #8a978f;
+
+  /* Marke */
+  --accent: #5546dc;
+  --accent-soft: #ece9ff;
+  --accent-ink: #ffffff;
+
+  /* Marktrichtung */
+  --pos: #0b7a53;
+  --pos-soft: #e2f2eb;
+  --neg: #bf3a2c;
+  --neg-soft: #fbe8e5;
+  --warn: #9a6c12;
+  --warn-soft: #f8efdc;
+
+  /* Auszeichnung Demo-Daten */
+  --demo: #7a5db8;
+  --demo-soft: #f0ebfa;
+
+  --shadow-card: 0 1px 2px rgb(22 33 30 / 0.05), 0 8px 24px -16px rgb(22 33 30 / 0.25);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: #0c1412;
+  --surface: #131c1a;
+  --surface-2: #182320;
+  --surface-3: #1f2b28;
+  --border: #25322e;
+  --border-strong: #37453f;
+
+  --ink: #e7ede9;
+  --ink-muted: #93a29b;
+  --ink-faint: #6c7d76;
+
+  --accent: #9c8dff;
+  --accent-soft: #241f4a;
+  --accent-ink: #14102e;
+
+  --pos: #46c48d;
+  --pos-soft: #12291f;
+  --neg: #f2776b;
+  --neg-soft: #2d1917;
+  --warn: #dfa842;
+  --warn-soft: #2a2113;
+
+  --demo: #b79aff;
+  --demo-soft: #241d38;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -20px rgb(0 0 0 / 0.9);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--ink-muted);
+  --color-faint: var(--ink-faint);
+
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-pos: var(--pos);
+  --color-pos-soft: var(--pos-soft);
+  --color-neg: var(--neg);
+  --color-neg-soft: var(--neg-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-demo: var(--demo);
+  --color-demo-soft: var(--demo-soft);
+
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4", ui-serif, Georgia, "Times New Roman", serif;
+
+  --radius-chip: 6px;
+  --radius-tile: 10px;
+  --radius-card: 14px;
+  --radius-panel: 20px;
+
+  --shadow-card: var(--shadow-card);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Zahlen laufen in Tabellen und Karten immer auf gleicher Breite. */
+  .num,
+  table,
+  time {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+}
+
+@layer utilities {
+  .rail {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .editorial {
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+  }
+
+  .hairline {
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
