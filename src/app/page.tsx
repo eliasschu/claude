@@ -4,6 +4,8 @@ import { newsToUiMeta } from "@/lib/data/types";
 import { MarketRail } from "@/components/market/market-rail";
 import { TodayPanel } from "@/components/home/today-panel";
 import { MagnificentSeven } from "@/components/home/magnificent-seven";
+import { CryptoTeaser } from "@/components/home/crypto-teaser";
+import { InsiderTeaser } from "@/components/home/insider-teaser";
 import { NewsFeed } from "@/components/news/news-feed";
 import { SectionTitle } from "@/components/ui/primitives";
 
@@ -18,6 +20,11 @@ export default async function HomePage() {
       <TodayPanel />
 
       <MagnificentSeven />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <CryptoTeaser />
+        <InsiderTeaser />
+      </div>
 
       <section aria-labelledby="nachrichten">
         <SectionTitle

@@ -11,6 +11,5 @@
  * Massendaten-Anbieter (siehe /datenquellen).
  */
 export const STOCK_MOVER_UNIVERSE = [
-  "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA",
-  "JPM", "UNH", "NVO", "ASML", "SAP",
+  "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "JPM",
 ];

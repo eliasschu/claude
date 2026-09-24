@@ -1,25 +1,27 @@
 import Link from "next/link";
-import { FEATURED_TICKERS, findListing, loadPrices } from "@/lib/services/stocks";
-import { getValuationSummary } from "@/lib/services/stock-analysis";
-import { Delta, Sparkline } from "@/components/common/data";
+import { FEATURED_TICKERS, findListing } from "@/lib/services/stocks";
+import { getStockQuote } from "@/lib/sources/twelvedata";
+import { Delta } from "@/components/common/data";
 import { SectionTitle } from "@/components/ui/primitives";
 import { WatchButton } from "@/components/watchlist/watch-button";
 import { formatNumber } from "@/lib/finance/format";
-import { VERDICT_TEXT } from "@/lib/finance/labels";
 
+/**
+ * Nur der Kurs, keine Modellbewertung: Eine Bewertung braucht pro Aktie rund
+ * ein Dutzend zusätzliche SEC-Abrufe (Jahresabschluss-Kennzahlen). Das wäre
+ * für sieben Werte auf der Startseite viel zu langsam. Die volle Bewertung
+ * gibt es auf der Aktienseite selbst.
+ */
 async function loadEntry(ticker: string) {
-  const [listing, prices] = await Promise.all([findListing(ticker), loadPrices(ticker)]);
-  if (!listing.ok || !prices.quote || prices.quote.price === null || prices.quote.changePct === null) return null;
-  const verdict = await getValuationSummary(ticker, prices.quote.price);
+  const [listing, quote] = await Promise.all([findListing(ticker), getStockQuote(ticker)]);
+  if (!listing.ok || !quote.ok || quote.data.price === null || quote.data.changePct === null) return null;
   return {
     ticker,
     name: listing.data.name,
     exchange: listing.data.exchange,
-    price: prices.quote.price,
-    currency: prices.quote.currency ?? "USD",
-    changePct: prices.quote.changePct,
-    spark: (prices.daily ?? []).slice(-30).map((p) => p[1]),
-    verdict,
+    price: quote.data.price,
+    currency: quote.data.currency ?? "USD",
+    changePct: quote.data.changePct,
   };
 }
 
@@ -33,7 +35,6 @@ export async function MagnificentSeven() {
 
       <ul className="rail -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
         {entries.map((entry) => {
-          const dir = entry.changePct > 0 ? 1 : entry.changePct < 0 ? -1 : 0;
           return (
             <li
               key={entry.ticker}
@@ -58,19 +59,10 @@ export async function MagnificentSeven() {
 
               <div className="mt-2 flex items-center justify-between gap-2">
                 <Delta value={entry.changePct} size="sm" />
-                <Sparkline values={entry.spark} direction={dir} width={72} height={22} />
+                <Link href={`/aktie/${entry.ticker}`} className="text-[11px] font-semibold text-accent hover:underline">
+                  Bewertung ansehen
+                </Link>
               </div>
-
-              <p className="mt-3 border-t border-line pt-2 text-[11px] leading-snug text-muted">
-                {entry.verdict && entry.verdict.deviation !== null ? (
-                  <>
-                    Modell: <span className="font-semibold text-ink">{VERDICT_TEXT[entry.verdict.verdict]}</span>
-                    <span className="num"> · Kurs {Math.abs(entry.verdict.deviation).toFixed(0)} % {entry.verdict.deviation > 0 ? "unter" : "über"} fairem Wert</span>
-                  </>
-                ) : (
-                  "Keine verlässliche Modellbewertung verfügbar"
-                )}
-              </p>
             </li>
           );
         })}
