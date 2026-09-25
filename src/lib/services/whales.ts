@@ -11,6 +11,11 @@ export interface WhaleHolding extends ThirteenFHolding {
   previousShares: number | null;
 }
 
+export interface PortfolioTrendPoint {
+  reportDate: string;
+  totalValueUsd: number;
+}
+
 export interface WhalePortfolio {
   profile: WhaleProfile;
   managerName: string;
@@ -19,9 +24,13 @@ export interface WhalePortfolio {
   previousReportDate: string | null;
   holdings: WhaleHolding[];
   totalValueUsd: number;
+  /** Bis zu drei Quartale (aeltestes zuerst), fuer den kleinen Verlaufs-Trend. */
+  trend: PortfolioTrendPoint[];
   documentUrl: string;
   fetchedAt: string;
 }
+
+const sumValue = (holdings: { valueUsd: number }[]) => holdings.reduce((s, h) => s + h.valueUsd, 0);
 
 function classify(current: number | null, previous: number | null): PositionChange {
   if (previous === null || previous === 0) return "neu";
@@ -51,7 +60,7 @@ export async function getWhalePortfolio(profile: WhaleProfile): Promise<Result<W
   // Nur die juengste Meldung je Quartalsende (Mehrfacheinreichungen am selben Tag kommen vor).
   const byQuarter = new Map<string, (typeof quarterly)[number]>();
   for (const f of quarterly) if (!byQuarter.has(f.reportDate!)) byQuarter.set(f.reportDate!, f);
-  const [latest, previous] = [...byQuarter.values()];
+  const [latest, previous, older] = [...byQuarter.values()];
   if (!latest) return fail("sec", "not_found", "Keine 13F-Meldung gefunden.");
 
   const currentTable = await getForm13F(profile.cik, latest.accession, latest.primaryDocument, latest.filingDate, latest.reportDate);
@@ -61,6 +70,11 @@ export async function getWhalePortfolio(profile: WhaleProfile): Promise<Result<W
     ? await getForm13F(profile.cik, previous.accession, previous.primaryDocument, previous.filingDate, previous.reportDate)
     : null;
   const previousByCusip = new Map((previousTable?.holdings ?? []).map((h) => [h.cusip, h]));
+
+  // Nur fuer den Verlaufs-Trend gebraucht - keine Positions-Klassifizierung fuer dieses Quartal.
+  const olderTable = older
+    ? await getForm13F(profile.cik, older.accession, older.primaryDocument, older.filingDate, older.reportDate)
+    : null;
 
   const holdings: WhaleHolding[] = currentTable.holdings
     .map((h) => {
@@ -76,11 +90,17 @@ export async function getWhalePortfolio(profile: WhaleProfile): Promise<Result<W
     holdings.push({ ...prev, valueUsd: 0, shares: 0, change: "geschlossen", previousShares: prev.shares });
   }
 
+  const trend: PortfolioTrendPoint[] = [
+    ...(olderTable ? [{ reportDate: older!.reportDate!, totalValueUsd: sumValue(olderTable.holdings) }] : []),
+    ...(previousTable ? [{ reportDate: previous!.reportDate!, totalValueUsd: sumValue(previousTable.holdings) }] : []),
+    { reportDate: latest.reportDate!, totalValueUsd: sumValue(currentTable.holdings) },
+  ];
+
   return ok({
     profile, managerName: company.data.name,
     reportDate: latest.reportDate!, filingDate: latest.filingDate,
     previousReportDate: previous?.reportDate ?? null,
-    holdings, totalValueUsd: currentTable.holdings.reduce((s, h) => s + h.valueUsd, 0),
+    holdings, totalValueUsd: sumValue(currentTable.holdings), trend,
     documentUrl: currentTable.documentUrl, fetchedAt: company.meta.fetchedAt,
   }, company.meta);
 }

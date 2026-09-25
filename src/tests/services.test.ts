@@ -235,14 +235,18 @@ describe("Große Fische (13F)", () => {
       <infoTable><nameOfIssuer>NEWCO INC</nameOfIssuer><cusip>222222222</cusip><value>8000</value>
         <shrsOrPrnAmt><sshPrnamt>50000</sshPrnamt></shrsOrPrnAmt></infoTable>
     </informationTable>`;
+    const q1InfoTable = `<informationTable>
+      <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>80000</value>
+        <shrsOrPrnAmt><sshPrnamt>800000</sshPrnamt></shrsOrPrnAmt></infoTable>
+    </informationTable>`;
 
     route([
       (url) => url.includes("/submissions/CIK0001067983.json") ? json({
         cik: "1067983", name: "Berkshire Hathaway Inc", filings: { recent: {
-          accessionNumber: ["0001067983-26-000009", "0001067983-26-000005"],
-          form: ["13F-HR", "13F-HR"], filingDate: ["2026-08-14", "2026-05-15"],
-          reportDate: ["2026-06-30", "2026-03-31"],
-          primaryDocument: ["primary_doc.xml", "primary_doc.xml"], items: ["", ""],
+          accessionNumber: ["0001067983-26-000009", "0001067983-26-000005", "0001067983-26-000001"],
+          form: ["13F-HR", "13F-HR", "13F-HR"], filingDate: ["2026-08-14", "2026-05-15", "2026-02-14"],
+          reportDate: ["2026-06-30", "2026-03-31", "2025-12-31"],
+          primaryDocument: ["primary_doc.xml", "primary_doc.xml", "primary_doc.xml"], items: ["", "", ""],
         } },
       }) : null,
       (url) => url.endsWith("000106798326000009/index.json") ? json({ directory: { item: [
@@ -251,14 +255,22 @@ describe("Große Fische (13F)", () => {
       (url) => url.endsWith("000106798326000005/index.json") ? json({ directory: { item: [
         { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
       ] } }) : null,
+      (url) => url.endsWith("000106798326000001/index.json") ? json({ directory: { item: [
+        { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
+      ] } }) : null,
       (url) => url.endsWith("000106798326000009/infotable.xml") ? text(q3InfoTable) : null,
       (url) => url.endsWith("000106798326000005/infotable.xml") ? text(q2InfoTable) : null,
+      (url) => url.endsWith("000106798326000001/infotable.xml") ? text(q1InfoTable) : null,
     ]);
 
     const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, nameHints: ["BERKSHIRE"], note: "" });
     if (!r.ok) throw new Error(r.message);
     assert.equal(r.data.reportDate, "2026-06-30");
     assert.equal(r.data.previousReportDate, "2026-03-31");
+
+    assert.deepEqual(r.data.trend.map((t) => t.reportDate), ["2025-12-31", "2026-03-31", "2026-06-30"]);
+    assert.equal(r.data.trend[0].totalValueUsd, 80000 * 1000);
+    assert.equal(r.data.trend[2].totalValueUsd, (150000 + 8000) * 1000);
 
     const apple = r.data.holdings.find((h) => h.cusip === "037833100")!;
     assert.equal(apple.change, "erhöht");

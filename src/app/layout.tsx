@@ -5,7 +5,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { WatchlistProvider } from "@/components/watchlist/watchlist-provider";
 
 export const metadata: Metadata = {
-  title: "Der junge Kapitalist – Märkte, Bewertung und Nachrichten",
+  title: "Der junge Kapitalist",
   description:
     "Deutschsprachige Finanzplattform für Privatanleger: Marktleiste, Fair-Value-Modell, Nachrichten und Insider-Meldungen – mit Quelle und Datenstand an jedem Wert.",
 };

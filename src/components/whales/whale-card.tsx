@@ -3,6 +3,8 @@ import { getWhalePortfolio } from "@/lib/services/whales";
 import { Card, Chip } from "@/components/ui/primitives";
 import { formatCompact, formatDate } from "@/lib/finance/format";
 import { AllocationBar, type AllocationSlice } from "./allocation-bar";
+import { TrendSparkline } from "./trend-sparkline";
+import { FavoriteStar } from "./favorite-star";
 
 const CHANGE_TONE: Record<string, "pos" | "neg" | "neutral" | "warn"> = {
   neu: "pos", "erhöht": "pos", reduziert: "warn", geschlossen: "neg", "unverändert": "neutral",
@@ -28,13 +30,17 @@ export async function WhaleCard({ profile, rows = 5 }: { profile: WhaleProfile; 
   return (
     <Card className="p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-1.5">
+        <FavoriteStar slug={profile.slug} label={profile.displayName} />
         <h2 className="text-[13px] font-bold">{profile.displayName}</h2>
         <span className="ml-auto text-[11px] text-faint">Stand {formatDate(result.data.reportDate)}</span>
       </div>
-      <p className="text-[11px] text-faint">
-        US-Aktienbestand laut SEC-13F, {formatCompact(result.data.totalValueUsd, "USD")} gesamt
-        {result.data.previousReportDate ? ` · Vergleich zu ${formatDate(result.data.previousReportDate)}` : ""}
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] text-faint">
+          US-Aktienbestand laut SEC-13F, {formatCompact(result.data.totalValueUsd, "USD")} gesamt
+          {result.data.previousReportDate ? ` · Vergleich zu ${formatDate(result.data.previousReportDate)}` : ""}
+        </p>
+        <TrendSparkline trend={result.data.trend} />
+      </div>
       {profile.netWorth ? (
         <p className="mt-1 text-[11px] text-muted">
           Persönliches Vermögen laut Forbes: <span className="font-semibold text-ink">{formatCompact(profile.netWorth.usd, "USD")}</span>
