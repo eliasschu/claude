@@ -7,18 +7,48 @@ const CONNECTED = [
   { area: "Aktienkurse (Intraday, aktuell)", source: "Twelve Data", env: "TWELVEDATA_API_KEY", note: "Gratistarif: 8 Abrufe/Minute, 800/Tag. Kein Bulk-Endpunkt – deshalb kuratierte Beobachtungsliste statt Top-500-Aktien." },
   { area: "Kryptowährungen", source: "CoinGecko", env: "COINGECKO_API_KEY", note: "Top ~500 nach Marktkapitalisierung in einem Abruf – vollständige Liste, kostenlos." },
   { area: "Unternehmenszahlen, Insider (Form 4)", source: "SEC EDGAR", env: "SEC_EDGAR_USER_AGENT", note: "Kostenlos, benötigt aussagekräftigen User-Agent. Nur bei der SEC registrierte (meist US-)Unternehmen." },
+  { area: "13F-Meldungen institutioneller Investoren (\"Große Fische\")", source: "SEC EDGAR", env: "SEC_EDGAR_USER_AGENT", note: "Kostenlos, vierteljährlich mit bis zu 45 Tagen Meldeverzug. Siehe /grosse-fische." },
   { area: "Zinsen, Wechselkurs, Rohöl", source: "EZB, US-Finanzministerium, EIA", env: "EIA_API_KEY", note: "EZB und US-Treasury ohne Schlüssel, EIA braucht einen kostenlosen Schlüssel." },
   { area: "Presse-Meldungen", source: "EZB-, Fed- und SEC-Pressefeeds (RSS)", env: "–", note: "Offizielle Pressemitteilungen, keine redaktionelle Einordnung." },
 ];
 
 const MISSING = [
-  { area: "Indexstände (DAX, S&P 500, Nasdaq 100, MSCI World)", note: "Lizenzpflichtig, in keinem Gratistarif enthalten. ETF-Kurse werden bewusst nicht als Indexstand ausgegeben." },
-  { area: "Gold- und Silberpreis", note: "Referenzpreise sind lizenzpflichtig." },
-  { area: "Top-500-Aktien live gerankt", note: "Twelve Data Gratistarif erlaubt 8 Abrufe/Minute – 500 Einzelabrufe würden über eine Stunde dauern. Braucht einen Massendaten-Anbieter (z. B. EODHD, Financial Modeling Prep)." },
-  { area: "Analystenkonsens und Kursziele", note: "Kein Anbieter angebunden. Würde z. B. Financial Modeling Prep erfordern." },
-  { area: "Reiche Unternehmensprofile (Segmente, Wettbewerber, Moat)", note: "SEC-Zahlen liefern das nicht; braucht einen redaktionellen oder KI-gestützten Datenanbieter." },
-  { area: "Politiker-Offenlegungen (Congressional Disclosures)", note: "Rohdaten sind PDFs; ein Aufbereitungsdienst ist nötig." },
-  { area: "13F-Meldungen institutioneller Investoren", note: "Bei der SEC verfügbar, aber noch nicht als Dienst angebunden." },
+  {
+    area: "Indexstände (DAX, S&P 500, Nasdaq 100, MSCI World)",
+    note: "Lizenzpflichtig, in keinem Gratistarif enthalten. ETF-Kurse werden bewusst nicht als Indexstand ausgegeben.",
+    provider: "Twelve Data, höherer Tarif (\"Grow\")", cost: "ab ca. 29–79 $/Monat",
+    caveat: "Unsicher, ob Indexlevel im Tarif enthalten sind – vor Anmeldung direkt bei Twelve Data klären.",
+  },
+  {
+    area: "Gold- und Silberpreis (echter Spotpreis)",
+    note: "Referenzpreise sind durchweg lizenzpflichtig.",
+    provider: "–", cost: "kein günstiger Anbieter gefunden",
+    caveat: "ETF-Ersatz (GLD/SLV, bereits angebunden) bleibt die pragmatische Lösung.",
+  },
+  {
+    area: "Top-500-Aktien live gerankt",
+    note: "Twelve Data Gratistarif erlaubt 8 Abrufe/Minute – 500 Einzelabrufe würden über eine Stunde dauern.",
+    provider: "EODHD, Bulk-Fundamentals-API", cost: "\"All-in-One\" 99,99 €/Monat; echter Bulk-Endpunkt braucht zusätzlich einen \"Extended Fundamentals\"-Vertrag (Preis nur auf Anfrage)",
+    caveat: "",
+  },
+  {
+    area: "Analystenkonsens und Kursziele",
+    note: "Kein Anbieter angebunden.",
+    provider: "Financial Modeling Prep", cost: "Free-Tier vorhanden (250 Abrufe/Tag); bezahlte Stufen mit widersprüchlichen Preisangaben in der Recherche – vor Anmeldung live prüfen",
+    caveat: "",
+  },
+  {
+    area: "Reiche Unternehmensprofile (Segmente, Wettbewerber, Moat)",
+    note: "SEC-Zahlen liefern das nicht.",
+    provider: "–", cost: "kein passender Anbieter recherchiert",
+    caveat: "",
+  },
+  {
+    area: "Politiker-Offenlegungen (Congressional Disclosures)",
+    note: "Rohdaten sind PDFs direkt vom US-Kongress, öffentlich, aber unstrukturiert.",
+    provider: "Quiver Quantitative", cost: "Hobbyist 15 $ / Trader 30 $ pro Monat",
+    caveat: "Diese Tarife verbieten Weitergabe an Dritte ausdrücklich – für eine App mit zahlenden Nutzern wäre die separate \"Commercial\"-Lizenz nötig (Preis nur auf Anfrage bei Quiver). Deshalb vorerst zurückgestellt.",
+  },
 ];
 
 export default function SourcesPage() {
@@ -63,14 +93,35 @@ export default function SourcesPage() {
       <Card>
         <CardHeader title="Noch nicht verfügbar" description="Bewusst leer statt erfunden. Diese Bereiche brauchen eine zusätzliche, meist kostenpflichtige Quelle." />
         <CardBody>
-          <ul className="space-y-2.5 text-[12px]">
+          <ul className="space-y-3 text-[12px]">
             {MISSING.map((m) => (
-              <li key={m.area} className="border-b border-line pb-2.5 last:border-0">
+              <li key={m.area} className="border-b border-line pb-3 last:border-0">
                 <span className="font-semibold">{m.area}</span>
                 <p className="mt-0.5 text-muted">{m.note}</p>
+                {m.provider !== "–" ? (
+                  <p className="mt-1 text-[11px] text-faint">
+                    Möglicher Anbieter: <span className="font-semibold text-muted">{m.provider}</span> · {m.cost}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-faint">{m.cost}</p>
+                )}
+                {m.caveat ? <p className="mt-1 text-[11px] text-warn">{m.caveat}</p> : null}
               </li>
             ))}
           </ul>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Vorschlag: bezahlte Stufen (Recherche-Stand, noch nicht umgesetzt)"
+          description="Reine Recherche vom September 2026 – keine Anmeldung, kein Kauf. Preise vor einer echten Umsetzung live gegenprüfen, sie schwankten schon zwischen zwei Recherche-Durchläufen."
+        />
+        <CardBody className="space-y-2.5 text-[12px] leading-relaxed">
+          <p><span className="font-semibold">Free (wie heute):</span> kuratierte Insider-Watchlist, Große Fische inkl. Konsens-Käufe, Kryptowährungen, Marktleiste mit ETF-Ersatzkursen.</p>
+          <p><span className="font-semibold">Plus (9,99 €):</span> höherer Twelve-Data-Tarif für mehr/aktuellere Kurse und – falls bestätigt – echte Indexstände; größere Insider-Watchlist.</p>
+          <p><span className="font-semibold">Pro (29,99 €):</span> Analystenkonsens/Kursziele (Financial Modeling Prep), Top-500-Live-Ranking (EODHD).</p>
+          <p className="text-warn">Politiker-Offenlegungen sind bewusst in keiner Stufe eingeplant, solange die Lizenzfrage bei Quiver Quantitative ungeklärt ist.</p>
         </CardBody>
       </Card>
 
