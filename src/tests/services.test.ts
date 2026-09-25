@@ -9,7 +9,7 @@ import { __resetHttpState } from "../lib/core/http.ts";
 import { __resetTickerCache } from "../lib/sources/sec.ts";
 import { getStockOverview } from "../lib/services/stocks.ts";
 import { getInsiderActivity } from "../lib/services/insider.ts";
-import { getWhalePortfolio } from "../lib/services/whales.ts";
+import { getWhalePortfolio, getConsensusPicks } from "../lib/services/whales.ts";
 import { getNews } from "../lib/services/news.ts";
 import { getMarketCard } from "../lib/services/markets.ts";
 import { getCryptoRanking } from "../lib/services/crypto.ts";
@@ -284,6 +284,55 @@ describe("Große Fische (13F)", () => {
     const r = await getWhalePortfolio({ slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, nameHints: ["BERKSHIRE"], note: "" });
     assert.equal(r.ok, false);
     if (!r.ok) assert.match(r.message, /Some Unrelated Corp/);
+  });
+
+  test("Konsens-Käufe: zählt nur Aktien, die mehrere Fonds gleichzeitig offen halten", async () => {
+    const fund1Table = `<informationTable>
+      <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>150000</value>
+        <shrsOrPrnAmt><sshPrnamt>1500000</sshPrnamt></shrsOrPrnAmt></infoTable>
+      <infoTable><nameOfIssuer>NEWCO INC</nameOfIssuer><cusip>222222222</cusip><value>8000</value>
+        <shrsOrPrnAmt><sshPrnamt>50000</sshPrnamt></shrsOrPrnAmt></infoTable>
+    </informationTable>`;
+    const fund2Table = `<informationTable>
+      <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>90000</value>
+        <shrsOrPrnAmt><sshPrnamt>900000</sshPrnamt></shrsOrPrnAmt></infoTable>
+      <infoTable><nameOfIssuer>TESLA INC</nameOfIssuer><cusip>999999999</cusip><value>4000</value>
+        <shrsOrPrnAmt><sshPrnamt>10000</sshPrnamt></shrsOrPrnAmt></infoTable>
+    </informationTable>`;
+
+    route([
+      (url) => url.includes("/submissions/CIK0001067983.json") ? json({
+        cik: "1067983", name: "Berkshire Hathaway Inc", filings: { recent: {
+          accessionNumber: ["0001067983-26-000009"], form: ["13F-HR"], filingDate: ["2026-08-14"],
+          reportDate: ["2026-06-30"], primaryDocument: ["primary_doc.xml"], items: [""],
+        } },
+      }) : null,
+      (url) => url.includes("/submissions/CIK0002000000.json") ? json({
+        cik: "2000000", name: "Second Fund LLC", filings: { recent: {
+          accessionNumber: ["0002000000-26-000001"], form: ["13F-HR"], filingDate: ["2026-08-10"],
+          reportDate: ["2026-06-30"], primaryDocument: ["primary_doc.xml"], items: [""],
+        } },
+      }) : null,
+      (url) => url.endsWith("000106798326000009/index.json") ? json({ directory: { item: [
+        { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
+      ] } }) : null,
+      (url) => url.endsWith("000200000026000001/index.json") ? json({ directory: { item: [
+        { name: "primary_doc.xml", type: "text.xml" }, { name: "infotable.xml", type: "text.xml" },
+      ] } }) : null,
+      (url) => url.endsWith("000106798326000009/infotable.xml") ? text(fund1Table) : null,
+      (url) => url.endsWith("000200000026000001/infotable.xml") ? text(fund2Table) : null,
+    ]);
+
+    const profiles = [
+      { slug: "berkshire-hathaway", displayName: "Warren Buffett / Berkshire Hathaway", cik: 1067983, nameHints: ["BERKSHIRE"], note: "" },
+      { slug: "second-fund", displayName: "Second Fund LLC", cik: 2000000, nameHints: ["SECOND FUND"], note: "" },
+    ];
+    const { picks, issues } = await getConsensusPicks(profiles, 2);
+    assert.equal(issues.length, 0);
+    assert.equal(picks.length, 1);
+    assert.equal(picks[0].cusip, "037833100");
+    assert.equal(picks[0].fundCount, 2);
+    assert.equal(picks[0].totalValueUsd, (150000 + 90000) * 1000);
   });
 });
 

@@ -1,6 +1,6 @@
 import { getCompany, getForm13F } from "../sources/sec.ts";
 import { fail, ok, type Result } from "../core/meta.ts";
-import type { WhaleProfile } from "../../config/whales.ts";
+import { WHALES, type WhaleProfile } from "../../config/whales.ts";
 import type { ThirteenFHolding } from "../sources/parsers/sec-13f.ts";
 
 export type PositionChange = "neu" | "erhöht" | "reduziert" | "unverändert" | "geschlossen";
@@ -83,4 +83,66 @@ export async function getWhalePortfolio(profile: WhaleProfile): Promise<Result<W
     holdings, totalValueUsd: currentTable.holdings.reduce((s, h) => s + h.valueUsd, 0),
     documentUrl: currentTable.documentUrl, fetchedAt: company.meta.fetchedAt,
   }, company.meta);
+}
+
+export interface ConsensusPickFund {
+  slug: string;
+  displayName: string;
+  change: PositionChange;
+  valueUsd: number;
+}
+
+export interface ConsensusPick {
+  issuerName: string;
+  cusip: string;
+  fundCount: number;
+  newOrIncreasedCount: number;
+  totalValueUsd: number;
+  funds: ConsensusPickFund[];
+}
+
+export interface ConsensusResult {
+  picks: ConsensusPick[];
+  issues: { profile: string; message: string }[];
+  fetchedAt: string | null;
+}
+
+const CONSENSUS_MIN_FUNDS = 3;
+
+/**
+ * Reine Auswertung bereits geladener 13F-Bestaende - keine neue Datenquelle,
+ * kein zusaetzliches Fabrikationsrisiko. Zeigt, welche Aktien mehrere der
+ * beobachteten Fonds gleichzeitig (offen) halten.
+ */
+export async function getConsensusPicks(profiles: WhaleProfile[] = WHALES, minFunds = CONSENSUS_MIN_FUNDS): Promise<ConsensusResult> {
+  const issues: ConsensusResult["issues"] = [];
+  let fetchedAt: string | null = null;
+
+  const results = await Promise.all(profiles.map((p) => getWhalePortfolio(p)));
+  const byCusip = new Map<string, ConsensusPick>();
+
+  results.forEach((result, i) => {
+    const profile = profiles[i];
+    if (!result.ok) { issues.push({ profile: profile.displayName, message: result.message }); return; }
+    fetchedAt = result.data.fetchedAt;
+
+    for (const h of result.data.holdings) {
+      if (h.change === "geschlossen") continue;
+      const fundEntry: ConsensusPickFund = { slug: profile.slug, displayName: profile.displayName, change: h.change, valueUsd: h.valueUsd };
+      const existing = byCusip.get(h.cusip);
+      if (existing) {
+        existing.funds.push(fundEntry);
+        existing.totalValueUsd += h.valueUsd;
+      } else {
+        byCusip.set(h.cusip, { issuerName: h.issuerName, cusip: h.cusip, fundCount: 0, newOrIncreasedCount: 0, totalValueUsd: h.valueUsd, funds: [fundEntry] });
+      }
+    }
+  });
+
+  const picks = [...byCusip.values()]
+    .map((p) => ({ ...p, fundCount: p.funds.length, newOrIncreasedCount: p.funds.filter((f) => f.change === "neu" || f.change === "erhöht").length }))
+    .filter((p) => p.fundCount >= minFunds)
+    .sort((a, b) => b.fundCount - a.fundCount || b.totalValueUsd - a.totalValueUsd);
+
+  return { picks, issues, fetchedAt };
 }

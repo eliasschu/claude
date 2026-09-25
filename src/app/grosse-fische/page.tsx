@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { WHALES } from "@/config/whales";
 import { WhaleCard } from "@/components/whales/whale-card";
-import { PanelSkeleton } from "@/components/home/skeletons";
+import { ConsensusPicks } from "@/components/whales/consensus-picks";
+import { PanelSkeleton, ListSkeleton } from "@/components/home/skeletons";
 
 export const metadata: Metadata = { title: "Große Fische – Der junge Kapitalist" };
 
@@ -22,6 +23,10 @@ export default function GrosseFischePage() {
           Nicht-US-Positionen enthalten.
         </p>
       </div>
+
+      <Suspense fallback={<ListSkeleton />}>
+        <ConsensusPicks />
+      </Suspense>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {WHALES.map((profile) => (
