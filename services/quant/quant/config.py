@@ -6,6 +6,11 @@ import os
 from dataclasses import dataclass, field
 
 
+def _env_str(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    return value.strip() if value and value.strip() else default
+
+
 def _env(name: str, default: str | None = None) -> str | None:
     value = os.environ.get(name)
     return value.strip() if value and value.strip() else default
@@ -53,12 +58,12 @@ def load_settings() -> Settings:
             "Research/Paper/Shadow bis zur rechtlichen Pruefung."
         )
     return Settings(
-        database_url=_env("DATABASE_URL", "postgresql://quant:quant@localhost:5432/quant"),
+        database_url=_env_str("DATABASE_URL", "postgresql://quant:quant@localhost:5432/quant"),
         redis_url=_env("REDIS_URL"),
         mode=mode,
-        crypto_cycle_seconds=int(_env("CRYPTO_CYCLE_SECONDS", "60")),
-        paper_account_id=_env("PAPER_ACCOUNT_ID", "paper-main"),
-        paper_starting_cash=float(_env("PAPER_STARTING_CASH", "100000")),
+        crypto_cycle_seconds=int(_env_str("CRYPTO_CYCLE_SECONDS", "60")),
+        paper_account_id=_env_str("PAPER_ACCOUNT_ID", "paper-main"),
+        paper_starting_cash=float(_env_str("PAPER_STARTING_CASH", "100000")),
         sec_user_agent=_env("SEC_EDGAR_USER_AGENT"),
         crypto_symbols=tuple((_env("CRYPTO_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT") or "").split(",")),
         equity_symbols=tuple((_env("EQUITY_SYMBOLS", "SPY,QQQ,AAPL,MSFT,NVDA,AMZN,META,GOOGL,TSLA,AMD") or "").split(",")),

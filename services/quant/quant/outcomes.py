@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import psycopg
-
 from .audit import SignalAuditService
+from .db import Conn
 from .repo import load_bars
 
-HORIZONS = {"1h": timedelta(hours=1), "1d": timedelta(days=1), "5d": timedelta(days=5), "10d": timedelta(days=10), "20d": timedelta(days=20)}
+HORIZONS = {"1h": timedelta(hours=1), "4h": timedelta(hours=4), "1d": timedelta(days=1), "3d": timedelta(days=3),
+            "5d": timedelta(days=5), "7d": timedelta(days=7), "10d": timedelta(days=10), "20d": timedelta(days=20),
+            "30d": timedelta(days=30)}
 CALC_VERSION = "outcomes-0.1.0"
 
 
@@ -28,7 +29,7 @@ def _path_stats(bars, entry: float, direction: str) -> tuple[float | None, float
     return hi * 100, lo * 100
 
 
-def resolve_outcomes(conn: psycopg.Connection, now: datetime, benchmarks: dict[str, str]) -> int:
+def resolve_outcomes(conn: Conn, now: datetime, benchmarks: dict[str, str | None]) -> int:
     """benchmarks: asset-Gruppe ('crypto'|'equity') -> instrument_id der Benchmark."""
     audit = SignalAuditService(conn)
     done = 0
@@ -46,7 +47,7 @@ def resolve_outcomes(conn: psycopg.Connection, now: datetime, benchmarks: dict[s
         for h, delta in HORIZONS.items():
             if h in r["have"] or r["created_at"] + delta > now:
                 continue
-            if group == "equity" and h == "1h":
+            if group == "equity" and h in ("1h", "4h"):
                 continue  # Tagesdaten erlauben keine Stundenaufloesung
             end = r["created_at"] + delta
             # Nachtraegliche Aufloesung: alles, was heute bekannt ist (known_at=now) - das Signal selbst bleibt unberuehrt

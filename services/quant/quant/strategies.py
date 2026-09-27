@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Callable
 
 from .domain import Decision, Evidence, ExitPlan, FeatureSet, Horizon, Invalidation, RegimeState, StrategyEvaluation
 
@@ -151,7 +151,7 @@ _MAX_HOLD: dict[str, timedelta] = {
 
 
 def _has(regime: RegimeState, *labels: str) -> bool:
-    return any(l in regime.labels for l in labels)
+    return any(lab in regime.labels for lab in labels)
 
 
 # ---------------------------------------------------------------------------
@@ -387,11 +387,11 @@ class CryptoMomentumFundingOI(Strategy):
         rejections: list[str] = []
         crowd = None if fz is None else fz * sign
         funding_ok = crowd is not None and crowd <= 1.5
-        if funding_ok:
+        if funding_ok and fz is not None:
             s.plus("funding", f"Funding nicht überfüllt in Trade-Richtung (z = {_fmt(fz, 2)})", 15, "funding_rate_8h")
         elif crowd is None:
             s.minus("funding", "Funding-Historie zu kurz für eine Einordnung", 0, "funding_rate_8h")
-        elif crowd > 2:
+        elif crowd > 2 and fz is not None:
             s.minus("funding", f"Funding extrem in Trade-Richtung (z = {_fmt(fz, 2)}): Positionierung überfüllt", 15, "funding_rate_8h")
             rejections.append("Funding extrem in Trade-Richtung: Positionierung überfüllt")
         if fs.has("rvol_tod_60m") and fs.raw("rvol_tod_60m") > 1:

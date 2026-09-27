@@ -40,7 +40,7 @@ class Metrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counters: dict[str, dict[tuple, float]] = defaultdict(lambda: defaultdict(float))
-        self._hist: dict[str, dict[tuple, list[float]]] = defaultdict(dict)
+        self._hist: dict[str, dict[tuple, list[float]]] = defaultdict(dict)  # Name -> Labels -> Buckets, +Inf, Summe
 
     def inc(self, name: str, value: float = 1.0, **labels: str) -> None:
         with self._lock:
@@ -77,11 +77,11 @@ class Metrics:
             for name, series in sorted(self._counters.items()):
                 lines += [f"# HELP {name} {DESCRIPTIONS.get(name, name)}", f"# TYPE {name} counter"]
                 lines += [f"{name}{lab(k)} {v}" for k, v in series.items()]
-            for name, series in sorted(self._hist.items()):
+            for name, hseries in sorted(self._hist.items()):
                 lines += [f"# HELP {name} {DESCRIPTIONS.get(name, name)}", f"# TYPE {name} histogram"]
-                for k, h in series.items():
+                for k, h in hseries.items():
                     for i, b in enumerate(BUCKETS_MS):
-                        le = 'le="%s"' % b
+                        le = 'le="' + str(b) + '"'
                         lines.append(f"{name}_bucket{lab(k, le)} {h[i]}")
                     inf = 'le="+Inf"'
                     lines += [f"{name}_bucket{lab(k, inf)} {h[len(BUCKETS_MS)]}",

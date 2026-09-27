@@ -69,8 +69,9 @@ def parse_cover(xml_text: str) -> CoverPage:
     rp = None
     if period:
         try:
-            m, d, y = period.split("-") if "-" in period and len(period.split("-")[0]) == 2 else (None, None, None)
-            rp = date(int(y), int(m), int(d)) if m else date.fromisoformat(period[:10])
+            parts = period.split("-")
+            # 13F-Deckblatt: MM-DD-YYYY; zur Sicherheit auch ISO
+            rp = date(int(parts[2]), int(parts[0]), int(parts[1])) if len(parts[0]) == 2 else date.fromisoformat(period[:10])
         except ValueError:
             rp = None
     return CoverPage(rp, (text(child(form, "isAmendment")) or "").lower() == "true", text(path(form, "amendmentInfo", "amendmentType")),
@@ -107,6 +108,7 @@ def position_changes(previous: list[Holding] | None, current: list[Holding]) -> 
         else:
             change = "UNCHANGED"
         base = c or p
+        assert base is not None
         out.append({"cusip": key[0], "put_call": key[1] or None, "issuer_name": base["issuer_name"], "change": change,
                     "shares": cs, "previous_shares": ps if p else None, "value_usd": (c or {}).get("value_usd", 0.0),
                     "share_change_pct": ((cs / ps - 1) * 100) if p and ps else None})

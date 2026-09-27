@@ -1,7 +1,6 @@
 from datetime import timedelta
 
-from quant.features import (CryptoInputs, EquityInputs, crypto_features, cvd, equity_features, final_bars, percentile_rank,
-                            rvol_time_of_day)
+from quant.features import CryptoInputs, EquityInputs, crypto_features, cvd, equity_features, final_bars, percentile_rank, rvol_time_of_day
 from quant.providers.base import Bar
 from tests.helpers import T0, daily, minutes
 
@@ -61,6 +60,7 @@ def test_crypto_features_mark_missing_derivatives_as_unavailable():
 
 def test_quality_layer_rejects_broken_bars_with_reason():
     from datetime import datetime, timezone
+
     from quant.quality import validate_bars
     now = datetime(2026, 9, 22, tzinfo=timezone.utc)
     good = daily([100.0, 101.0, 102.0])

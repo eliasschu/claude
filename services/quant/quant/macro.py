@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-import psycopg
-
+from .db import Conn
 from .providers.base import MacroRelease
 from .providers.fred import release_available_at
 
 
-def store_vintages(conn: psycopg.Connection, rows: list[MacroRelease], *, received_at: datetime, mode: str = "live",
+def store_vintages(conn: Conn, rows: list[MacroRelease], *, received_at: datetime, mode: str = "live",
                    historical_latency: timedelta = timedelta(minutes=5)) -> int:
     """
     mode="live": received_at = Bot-Uhr. mode="historical": received_at = Veroeffentlichung + Latenz
@@ -39,7 +38,7 @@ def store_vintages(conn: psycopg.Connection, rows: list[MacroRelease], *, receiv
     return n
 
 
-def macro_as_of(conn: psycopg.Connection, series_id: str, as_of: datetime, since: date | None = None) -> list[dict]:
+def macro_as_of(conn: Conn, series_id: str, as_of: datetime, since: date | None = None) -> list[dict]:
     """Je Periode die zum Zeitpunkt as_of bekannte Fassung."""
     return conn.execute(
         """SELECT DISTINCT ON (observation_period) observation_period, value, vintage_date, revision_number, available_at

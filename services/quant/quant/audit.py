@@ -16,10 +16,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from . import BOT_VERSION
+from .db import Conn
 from .domain import DATASET_VERSION, FEATURE_VERSION, MODEL_VERSION, Decision, RegimeState, RiskAssessment, StrategyEvaluation
 
 # Bis zur rechtlichen Pruefung: nichts wird veroeffentlicht.
@@ -77,12 +77,12 @@ class SignalContext:
 
 
 class SignalAuditService:
-    def __init__(self, conn: psycopg.Connection):
+    def __init__(self, conn: Conn):
         self._conn = conn
 
     def record(self, ev: StrategyEvaluation, final_decision: Decision, risk: RiskAssessment, ctx: SignalContext) -> uuid.UUID:
-        if ctx.mode not in ("research", "paper"):
-            raise ValueError("Nur research/paper erlaubt")
+        if ctx.mode not in ("research", "paper", "backtest"):
+            raise ValueError("Nur research/paper/backtest erlaubt - kein Live-Handel")
         if final_decision == Decision.REJECTED_BY_RISK and risk.approved:
             raise ValueError("REJECTED_BY_RISK trotz Freigabe der Risk Engine")
         signal_id = uuid.uuid4()

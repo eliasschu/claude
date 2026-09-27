@@ -1,5 +1,3 @@
-import os
-from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,6 +56,7 @@ def test_api_signal_detail_events_strategies_and_audit(client):
     assert perf["sample_size"] == 0 and perf["win_rate"] is None
     assert client.get("/paper/portfolio", headers=h).json()["data"]["cash"] == 100_000
     assert client.get("/signals/00000000-0000-0000-0000-000000000000", headers=h).status_code == 404
+    assert client.get("/trades/00000000-0000-0000-0000-000000000000/explain", headers=h).status_code == 404
 
 
 def test_live_mode_cannot_be_configured(monkeypatch):

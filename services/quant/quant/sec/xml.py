@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Iterator
+from collections.abc import Iterator
 
 
 class SecParseError(ValueError):
@@ -65,7 +65,7 @@ def iter_local(el: ET.Element, name: str) -> Iterator[ET.Element]:
 def footnote_ids(el: ET.Element | None) -> list[str]:
     if el is None:
         return []
-    return [f.get("id") for f in el.iter() if local(f.tag) == "footnoteId" and f.get("id")]
+    return [fid for f in el.iter() if local(f.tag) == "footnoteId" and (fid := f.get("id"))]
 
 
 def num(s: str | None) -> float | None:

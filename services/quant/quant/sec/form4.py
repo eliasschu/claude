@@ -177,7 +177,7 @@ def parse_form4(xml_text: str) -> Form4:
     root = parse(xml_text)
     if local(root.tag) != "ownershipDocument":
         raise SecParseError(f"kein ownershipDocument, sondern {local(root.tag)}")
-    footnotes = {f.get("id"): " ".join(f.itertext()).strip() for f in children(child(root, "footnotes"), "footnote") if f.get("id")}
+    footnotes = {fid: " ".join(f.itertext()).strip() for f in children(child(root, "footnotes"), "footnote") if (fid := f.get("id"))}
     remarks = text(child(root, "remarks"))
     issuer = child(root, "issuer")
     issuer_cik = text(child(issuer, "issuerCik"))

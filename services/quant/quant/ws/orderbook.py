@@ -90,10 +90,11 @@ class LocalOrderBook:
         self.asks = {p: q for p, q in asks if q > 0}
         self.last_update_id = last_update_id
         self.exchange_time = exchange_time
-        pending = [e for e in self._buffer if e.last_update_id > last_update_id]  # Schritt 3
+        pending = [e for e in self._buffer if e.last_update_id is not None and e.last_update_id > last_update_id]  # Schritt 3
         self._buffer = []
         first = True
         for ev in pending:
+            assert ev.first_update_id is not None and ev.last_update_id is not None  # on_delta puffert nur Deltas mit IDs
             if first:
                 ok = (ev.first_update_id <= last_update_id + 1 <= ev.last_update_id) if self.rule == "binance_spot" \
                     else (ev.first_update_id <= last_update_id <= ev.last_update_id)

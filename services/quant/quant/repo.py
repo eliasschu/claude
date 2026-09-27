@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
-from typing import Iterable, Sequence
 
-import psycopg
 from psycopg.types.json import Jsonb
 
+from .db import Conn, one
 from .metrics import METRICS
 from .providers.base import Bar
 
 
-def ensure_instrument(conn: psycopg.Connection, instrument_id: str, asset_class: str, name: str, *, currency: str | None = None,
+def ensure_instrument(conn: Conn, instrument_id: str, asset_class: str, name: str, *, currency: str | None = None,
                       base_asset: str | None = None, quote_asset: str | None = None, exchange_mic: str | None = None,
                       identifiers: Iterable[tuple[str, str, str]] = ()) -> None:
     """identifiers: (scheme, value, venue)."""
@@ -30,7 +30,7 @@ def ensure_instrument(conn: psycopg.Connection, instrument_id: str, asset_class:
         )
 
 
-def resolve(conn: psycopg.Connection, scheme: str, value: str, venue: str = "", on: datetime | None = None) -> str | None:
+def resolve(conn: Conn, scheme: str, value: str, venue: str = "", on: datetime | None = None) -> str | None:
     row = conn.execute(
         """SELECT instrument_id FROM instrument_identifiers
            WHERE scheme=%s AND value=%s AND venue=%s AND valid_from <= COALESCE(%s::date, CURRENT_DATE)
@@ -41,7 +41,7 @@ def resolve(conn: psycopg.Connection, scheme: str, value: str, venue: str = "", 
     return row["instrument_id"] if row else None
 
 
-def upsert_bars(conn: psycopg.Connection, instrument_id: str, source_id: str, timeframe: str, bars: Sequence[Bar],
+def upsert_bars(conn: Conn, instrument_id: str, source_id: str, timeframe: str, bars: Sequence[Bar],
                 adjustment: str = "raw", *, received_at: datetime) -> int:
     """
     Abgeschlossene Balken werden gespeichert; ein bereits finaler Balken wird
@@ -68,7 +68,7 @@ def upsert_bars(conn: psycopg.Connection, instrument_id: str, source_id: str, ti
     return len(rows)
 
 
-def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, since: datetime, until: datetime,
+def load_bars(conn: Conn, instrument_id: str, timeframe: str, since: datetime, until: datetime,
               source_id: str | None = None, known_at: datetime | None = None, prefer_source: str | None = None) -> list[Bar]:
     """
     Balken im Zeitfenster [since, until), die zum Zeitpunkt `known_at` (Standard: until)
@@ -94,7 +94,7 @@ def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, sinc
             for r in rows]
 
 
-def record_observation(conn: psycopg.Connection, series_key: str, source_id: str, event_time: datetime, value: float | None,
+def record_observation(conn: Conn, series_key: str, source_id: str, event_time: datetime, value: float | None,
                        *, received_at: datetime, instrument_id: str | None = None, published_time: datetime | None = None,
                        available_at: datetime | None = None, value_json: dict | None = None, unit: str | None = None,
                        vintage: str | None = None) -> bool:
@@ -127,7 +127,7 @@ def record_observation(conn: psycopg.Connection, series_key: str, source_id: str
     return True
 
 
-def observations_as_of(conn: psycopg.Connection, series_key: str, instrument_id: str | None, since: datetime,
+def observations_as_of(conn: Conn, series_key: str, instrument_id: str | None, since: datetime,
                        as_of: datetime) -> list[dict]:
     """Je Ereigniszeitpunkt die Revision, die zum Zeitpunkt as_of bekannt war."""
     return conn.execute(
@@ -139,7 +139,7 @@ def observations_as_of(conn: psycopg.Connection, series_key: str, instrument_id:
 
 
 # --------------------------------------------------------------------------- WebSocket-Sekundenzeilen
-def store_flow(conn: psycopg.Connection, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
+def store_flow(conn: Conn, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
     if not rows:
         return 0
     with conn.cursor() as cur:
@@ -152,7 +152,7 @@ def store_flow(conn: psycopg.Connection, instrument_id: str, source_id: str, row
     return len(rows)
 
 
-def store_book(conn: psycopg.Connection, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
+def store_book(conn: Conn, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
     if not rows:
         return 0
     with conn.cursor() as cur:
@@ -165,18 +165,18 @@ def store_book(conn: psycopg.Connection, instrument_id: str, source_id: str, row
     return len(rows)
 
 
-def store_liquidations(conn: psycopg.Connection, instrument_id: str, source_id: str, liqs: Sequence) -> int:
+def store_liquidations(conn: Conn, instrument_id: str, source_id: str, liqs: Sequence) -> int:
     if not liqs:
         return 0
     with conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO liquidations (instrument_id, source_id, exchange_time, received_at, side, price, quantity, notional)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
-            [(instrument_id, source_id, l.exchange_time, l.received_at, l.side, l.price, l.quantity, l.notional) for l in liqs])
+            [(instrument_id, source_id, x.exchange_time, x.received_at, x.side, x.price, x.quantity, x.notional) for x in liqs])
     return len(liqs)
 
 
-def load_flow(conn: psycopg.Connection, spot_id: str, perp_id: str, as_of: datetime, window: timedelta = timedelta(minutes=5)):
+def load_flow(conn: Conn, spot_id: str, perp_id: str, as_of: datetime, window: timedelta = timedelta(minutes=5)):
     """Sekundenzeilen, die der Bot zum Zeitpunkt as_of kannte (received_at <= as_of)."""
     since = as_of - window
     flow = conn.execute("""SELECT * FROM trade_flow_1s WHERE instrument_id=%s AND ts >= %s AND received_at <= %s ORDER BY ts""",
@@ -185,6 +185,6 @@ def load_flow(conn: psycopg.Connection, spot_id: str, perp_id: str, as_of: datet
                         (spot_id, since, as_of)).fetchall()
     liqs = conn.execute("""SELECT * FROM liquidations WHERE instrument_id=%s AND exchange_time >= %s AND received_at <= %s""",
                         (perp_id, since, as_of)).fetchall()
-    alive = conn.execute("""SELECT max(received_at) AS t FROM ws_stream_status WHERE stream LIKE %s AND state='live'
-                            AND received_at <= %s""", (f"%:liquidations:{perp_id}", as_of)).fetchone()["t"]
+    alive = one(conn.execute("""SELECT max(received_at) AS t FROM ws_stream_status WHERE stream LIKE %s AND state='live'
+                            AND received_at <= %s""", (f"%:liquidations:{perp_id}", as_of)))["t"]
     return flow, book, liqs, alive

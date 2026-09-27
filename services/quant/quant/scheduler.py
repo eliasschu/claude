@@ -13,9 +13,9 @@ from zoneinfo import ZoneInfo
 
 from .heartbeat import beat
 from .outcomes import resolve_outcomes
-from .shadow import resolve_shadows
 from .repo import resolve
 from .runtime import build, stop_event
+from .shadow import resolve_shadows
 
 log = logging.getLogger("quant.scheduler")
 NEW_YORK = ZoneInfo("America/New_York")
@@ -98,8 +98,8 @@ def run_macro_and_cot(conn, settings, now: datetime) -> dict:
         by_type.setdefault(rtype, []).append(code)
     for rtype, codes in by_type.items():
         try:
-            r = cftc.reports(rtype, codes, (now - timedelta(days=3 * 365)).date())
-            totals["cot_rows"] += store_cot(conn, r.data, received_at=datetime.now(timezone.utc))
+            cot = cftc.reports(rtype, codes, (now - timedelta(days=3 * 365)).date())
+            totals["cot_rows"] += store_cot(conn, cot.data, received_at=datetime.now(timezone.utc))
             conn.commit()
         except ProviderError as exc:
             conn.rollback()

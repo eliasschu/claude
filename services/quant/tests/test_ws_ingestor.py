@@ -13,10 +13,10 @@ from websockets.asyncio.server import serve
 from quant.domain import FeatureSet
 from quant.repo import load_flow
 from quant.universe import crypto_instrument, parse_pair
+from quant.ws.events import TradeEvent
 from quant.ws.flow_features import add_flow_features
 from quant.ws.ingestor import Ingestor, SymbolIds, Writer
 from quant.ws.market_state import MarketState
-from quant.ws.events import TradeEvent
 
 
 def _ms(t):

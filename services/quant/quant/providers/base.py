@@ -9,9 +9,10 @@ Jede Antwort reist als `Sourced[T]` mit Quelle und den getrennten Zeitpunkten
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Generic, Literal, Protocol, Sequence, TypeVar, runtime_checkable
+from typing import Generic, Literal, Protocol, TypeVar, runtime_checkable
 
 T = TypeVar("T")
 

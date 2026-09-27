@@ -2,29 +2,40 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
+
+# Alle Verbindungen liefern Zeilen als dict (row_factory=dict_row)
+Conn = psycopg.Connection[DictRow]
 
 # Teil des Pakets (package-data), damit auch eine installierte Kopie ihre Migrationen findet
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
-def connect(database_url: str) -> psycopg.Connection:
+def one(cur: psycopg.Cursor[DictRow]) -> DictRow:
+    """Genau eine Zeile erwartet (Aggregat oder Pflichtdatensatz) - sonst laut scheitern statt mit None weiterrechnen."""
+    row = cur.fetchone()
+    if row is None:
+        raise LookupError("Abfrage lieferte keine Zeile")
+    return row
+
+
+def connect(database_url: str) -> Conn:
     # UTC fuer die Sitzung: Zeitstempel kommen immer in derselben Darstellung zurueck (Hash-Kette, Anzeige)
     return psycopg.connect(database_url, row_factory=dict_row, autocommit=False, options="-c timezone=UTC")
 
 
 @contextmanager
-def transaction(conn: psycopg.Connection) -> Iterator[psycopg.Connection]:
+def transaction(conn: Conn) -> Iterator[Conn]:
     with conn.transaction():
         yield conn
 
 
-def migrate(conn: psycopg.Connection) -> list[str]:
+def migrate(conn: Conn) -> list[str]:
     """Wendet alle noch nicht angewandten SQL-Migrationen in Dateinamen-Reihenfolge an."""
     applied: list[str] = []
     files = sorted(MIGRATIONS_DIR.glob("*.sql"))

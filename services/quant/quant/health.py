@@ -16,12 +16,14 @@ from datetime import datetime, timedelta
 
 import psycopg
 
+from .db import Conn
+
 MAX_CLOCK_SKEW = timedelta(seconds=5)
 ORDER = {"HEALTHY": 0, "DEGRADED": 1, "UNHEALTHY": 2}
 
 
 class ProviderHealthService:
-    def __init__(self, conn: psycopg.Connection):
+    def __init__(self, conn: Conn):
         self._conn = conn
 
     def record(self, source_id: str, status: str, *, checked_at: datetime, latency_ms: float | None = None,
@@ -81,7 +83,7 @@ def _component(name: str, state: str, reason: str, **extra) -> dict:
     return {"component": name, "state": state, "reason": reason, **extra}
 
 
-def system_health(conn: psycopg.Connection, now: datetime, t: HealthThresholds = HealthThresholds(),
+def system_health(conn: Conn, now: datetime, t: HealthThresholds = HealthThresholds(),
                   expect_ws: bool = False) -> dict:
     comps: list[dict] = []
     # DATABASE

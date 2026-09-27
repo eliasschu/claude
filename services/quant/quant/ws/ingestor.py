@@ -13,11 +13,12 @@ REST-Zyklus weiter (Health: DEGRADED).
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable
 
 from ..metrics import METRICS
 from . import normalizers
@@ -49,7 +50,7 @@ class SymbolIds:
 
 
 class Ingestor:
-    def __init__(self, symbols: list[SymbolIds], writer: "Writer", snapshot_fn: Callable[[str], tuple[int, list, list]], *,
+    def __init__(self, symbols: list[SymbolIds], writer: Writer, snapshot_fn: Callable[[str], tuple[int, list, list]], *,
                  clock: Callable[[], datetime] = utc_now, spot_ws: str = BINANCE_SPOT_WS, futures_ws: str = BINANCE_FUTURES_WS,
                  flush_interval: float = 1.0, connector=None, stream_kwargs: dict | None = None):
         self.symbols = {s.symbol: s for s in symbols}
@@ -72,7 +73,7 @@ class Ingestor:
             # Neuer Delta-Strom -> altes Buch ist wertlos: invalidieren, neuer Snapshot (Sequence Recovery)
             depth = WsStream(StreamSpec(f"binance:depth:{s.spot_id}", f"{spot_ws}/stream?streams={low}@depth@100ms",
                                         normalizers.binance, stale_after=30,
-                                        on_connect=lambda sym=s.symbol: self._reset_book(sym)), self.bus, clock=clock, **kw)
+                                        on_connect=functools.partial(self._reset_book, s.symbol)), self.bus, clock=clock, **kw)
             self._depth_stream[s.symbol] = depth
             self.streams.append(depth)
             # Liquidationen kommen nur bei Ereignissen - Lebendigkeit ueber Ping/Pong, nicht ueber Nachrichten
@@ -99,7 +100,7 @@ class Ingestor:
         while not stop.is_set():
             try:
                 ev = await asyncio.wait_for(q.get(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if isinstance(ev, TradeEvent) and ev.symbol in self.states:
                 self.states[ev.symbol].on_trade(ev)

@@ -43,8 +43,8 @@ def test_single_spike_never_becomes_a_candidate():
 
 
 def test_warm_start_restores_cooldown_after_restart(db):
-    from tests.test_orchestrator import START, confirm, make_bot
     from tests.fakes import Clock
+    from tests.test_orchestrator import START, confirm, make_bot
     clock = Clock(START)
     bot, _ = make_bot(db, clock)
     confirm(bot, clock)

@@ -7,14 +7,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
+
+from .db import Conn, one
 
 REDIS_CHANNEL = "bot:events"
 
 
 class BotEventLog:
-    def __init__(self, conn: psycopg.Connection, redis_client: Any | None = None):
+    def __init__(self, conn: Conn, redis_client: Any | None = None):
         self._conn = conn
         self._redis = redis_client
 
@@ -22,17 +23,17 @@ class BotEventLog:
              instrument_id: str | None = None, signal_id: uuid.UUID | None = None, payload: dict | None = None,
              at: datetime | None = None) -> int:
         created = at or datetime.now(timezone.utc)
-        row = self._conn.execute(
+        row = one(self._conn.execute(
             """INSERT INTO bot_events (created_at, cycle_id, event_type, severity, instrument_id, signal_id, message, payload)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING event_id""",
             (created, cycle_id, event_type, severity, instrument_id, signal_id, message, Jsonb(payload or {})),
-        ).fetchone()
+        ))
         if self._redis is not None:
             try:
                 self._redis.publish(REDIS_CHANNEL, json.dumps({
                     "event_id": row["event_id"], "created_at": created.isoformat(), "event_type": event_type,
                     "severity": severity, "instrument_id": instrument_id, "message": message,
                 }))
-            except Exception:  # Redis ist nur Beschleuniger; die Datenbank bleibt die Wahrheit
+            except Exception:  # noqa: BLE001 - Redis ist nur Beschleuniger; die Datenbank bleibt die Wahrheit
                 pass
         return row["event_id"]

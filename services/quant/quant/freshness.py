@@ -13,9 +13,9 @@ Alter wird immer vom Datenzeitpunkt aus gemessen, nie vom Abruf.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable
 
 FUTURE_TOLERANCE = timedelta(minutes=2)
 

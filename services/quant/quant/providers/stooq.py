@@ -30,12 +30,12 @@ def parse_csv(text: str) -> list[Bar]:
     for row in reader:
         try:
             d = date.fromisoformat(row["Date"])
-            o, h, l, c = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
+            o, h, lo, c = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
             v = float(row.get("Volume") or 0)
         except (ValueError, KeyError):
             continue
         # Tageskerze: Balkenbeginn = Kalendertag 00:00 UTC (Konvention fuer 1d)
-        bars.append(Bar(ts=datetime.combine(d, time(0), tzinfo=timezone.utc), open=o, high=h, low=l, close=c, volume=v, is_final=True))
+        bars.append(Bar(ts=datetime.combine(d, time(0), tzinfo=timezone.utc), open=o, high=h, low=lo, close=c, volume=v, is_final=True))
     return sorted(bars, key=lambda b: b.ts)
 
 

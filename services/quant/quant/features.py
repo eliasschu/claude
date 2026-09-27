@@ -12,15 +12,15 @@ Regeln
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from statistics import fmean, pstdev
-from typing import Sequence
-
-from .domain import FeatureSet, FeatureValue
 from zoneinfo import ZoneInfo
 
+from .domain import FeatureSet, FeatureValue
 from .freshness import Freshness, assess
+from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, PremiumIndex, Quote
 
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -29,7 +29,6 @@ def equity_close_time(bar: Bar) -> datetime:
     """Tatsaechlicher Datenzeitpunkt eines US-Tagesbalkens: Handelsschluss 16:00 New York (sommerzeitkorrekt)."""
     from datetime import time as _time
     return datetime.combine(bar.ts.date(), _time(16, 0), tzinfo=NEW_YORK)
-from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, PremiumIndex, Quote
 
 # ---------------------------------------------------------------------------
 # Reine Kennzahlen
@@ -117,7 +116,7 @@ def cvd(bars: Sequence[Bar]) -> float | None:
     """Cumulative Volume Delta aus Aggressor-Kaufvolumen: Kauf - Verkauf."""
     if not bars or any(b.taker_buy_volume is None for b in bars):
         return None
-    return sum(2 * b.taker_buy_volume - b.volume for b in bars)  # type: ignore[operator]
+    return sum(2 * (b.taker_buy_volume or 0.0) - b.volume for b in bars)
 
 
 def buy_share(bars: Sequence[Bar]) -> float | None:

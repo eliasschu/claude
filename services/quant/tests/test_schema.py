@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime, timezone
 
 import psycopg
@@ -62,8 +61,9 @@ def test_parallel_migrations_do_not_race():
     """Worker, Scheduler und API starten gleichzeitig und migrieren alle."""
     import threading
     import uuid as _uuid
-    from tests.conftest import ADMIN_URL, drop_database
+
     from quant.db import connect
+    from tests.conftest import ADMIN_URL, drop_database
     name = f"t_{_uuid.uuid4().hex[:12]}"
     admin = psycopg.connect(ADMIN_URL, autocommit=True)
     admin.execute(f'CREATE DATABASE "{name}"')
@@ -87,6 +87,7 @@ def test_parallel_migrations_do_not_race():
 def test_migrations_ship_inside_the_package():
     """Docker installiert das Paket nach site-packages; die Migrationen muessen mitkommen."""
     from pathlib import Path
+
     import quant
     from quant.db import MIGRATIONS_DIR
     assert MIGRATIONS_DIR.parent == Path(quant.__file__).resolve().parent

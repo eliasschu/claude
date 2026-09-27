@@ -17,12 +17,13 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
-from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from . import BOT_VERSION
 from .audit import SignalAuditService
 from .config import load_settings
+from .db import one
 from .domain import STRENGTH_DISCLAIMER
 from .health import ProviderHealthService, system_health
 from .metrics import METRICS
@@ -131,7 +132,7 @@ def bot_status(conn=Depends(db)) -> dict:
     universe = conn.execute(
         """SELECT CASE WHEN i.asset_class LIKE 'crypto%' THEN 'crypto' ELSE 'equity' END AS g, count(DISTINCT b.instrument_id) AS n
            FROM bars b JOIN instruments i USING (instrument_id) WHERE b.received_at >= now() - interval '3 days' GROUP BY 1""").fetchall()
-    last_data = conn.execute("SELECT max(received_at) AS t FROM bars").fetchone()["t"]
+    last_data = one(conn.execute("SELECT max(received_at) AS t FROM bars"))["t"]
     kill = conn.execute(
         "SELECT created_at, message FROM bot_events WHERE event_type='kill_switch' ORDER BY event_id DESC LIMIT 1").fetchone()
     worker_alive = any(c["started_at"] >= datetime.now(timezone.utc) - timedelta(minutes=5) for c in cycles)
@@ -184,6 +185,16 @@ def get_signal(signal_id: uuid.UUID, conn=Depends(db)) -> dict:
     return envelope({"signal": s, "outcomes": outcomes, "features": features["features"] if features else None}, s["mode"])
 
 
+@app.get("/trades/{position_id}/explain", dependencies=[Auth])
+def trade_explain(position_id: uuid.UUID, conn=Depends(db)) -> dict:
+    """Warum wurde dieser Trade eroeffnet? Signal, Begruendung, Eingangsmerkmale, Risk, Order, Ausfuehrung, Ergebnis."""
+    from .backtest.explain import explain_trade
+    x = explain_trade(conn, position_id)
+    if x is None:
+        raise HTTPException(404, "Trade nicht gefunden")
+    return envelope(x)
+
+
 @app.get("/strategies", dependencies=[Auth])
 def strategies() -> dict:
     reg = StrategyRegistry()
@@ -204,9 +215,9 @@ def paper_portfolio(conn=Depends(db)) -> dict:
     closed = conn.execute(
         """SELECT p.*, i.name FROM paper_positions p JOIN instruments i USING (instrument_id)
            WHERE p.account_id=%s AND p.closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 100""", (account,)).fetchall()
-    cash = conn.execute(
+    cash = one(conn.execute(
         """SELECT %s - COALESCE(SUM(CASE WHEN o.side='buy' THEN f.price*f.quantity + f.fee ELSE -(f.price*f.quantity) + f.fee END),0) AS c
-           FROM paper_orders o JOIN paper_fills f USING (order_id) WHERE o.account_id=%s""", (acc["starting_cash"], account)).fetchone()["c"]
+           FROM paper_orders o JOIN paper_fills f USING (order_id) WHERE o.account_id=%s""", (acc["starting_cash"], account)))["c"]
     mtm = sum((p["last_close"] or p["entry_price"]) * p["quantity"] * (1 if p["side"] == "long" else -1) for p in positions)
     return envelope({"account": acc, "cash": cash, "equity_mark_to_market": cash + mtm,
                      "mark_basis": "letzter gespeicherter Schlusskurs je Instrument", "open_positions": positions, "closed_positions": closed})

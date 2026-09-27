@@ -5,8 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import (
-    CryptoMarketProvider, FundamentalProvider, InsiderProvider, InstitutionalProvider, MacroProvider,
-    MarketDataProvider, NewsProvider, NotConfiguredProvider, OnChainProvider, OptionsProvider,
+    CryptoMarketProvider,
+    FundamentalProvider,
+    InsiderProvider,
+    InstitutionalProvider,
+    MacroProvider,
+    MarketDataProvider,
+    NewsProvider,
+    NotConfiguredProvider,
+    OnChainProvider,
+    OptionsProvider,
 )
 from .binance import BinanceProvider
 from .coinbase import CoinbaseProvider

@@ -4,8 +4,8 @@ import pytest
 
 from quant.config import load_settings
 from quant.shadow import resolve_shadows
-from tests.test_orchestrator import START, confirm, make_bot, uptrend
 from tests.fakes import Clock
+from tests.test_orchestrator import START, confirm, make_bot, uptrend
 
 
 def test_live_trading_is_hard_blocked(monkeypatch):

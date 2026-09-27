@@ -32,7 +32,7 @@ def db():
 
 def drop_database(admin, name: str) -> None:
     """Ein Autovacuum-Prozess des Superusers kann kurz noch verbunden sein; ihn darf die Testrolle nicht beenden."""
-    for attempt in range(20):
+    for _ in range(20):
         try:
             admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
             return

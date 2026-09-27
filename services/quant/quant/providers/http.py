@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 

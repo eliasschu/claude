@@ -6,15 +6,15 @@ import os
 import socket
 from datetime import datetime
 
-import psycopg
 from psycopg.types.json import Jsonb
 
+from .db import Conn
 from .metrics import METRICS
 
 INSTANCE_ID = os.environ.get("HOSTNAME") or socket.gethostname()
 
 
-def beat(conn: psycopg.Connection, service: str, *, now: datetime, started_at: datetime, status: str = "HEALTHY",
+def beat(conn: Conn, service: str, *, now: datetime, started_at: datetime, status: str = "HEALTHY",
          details: dict | None = None) -> None:
     conn.execute(
         """INSERT INTO service_heartbeats (service, instance_id, started_at, last_beat, status, details, metrics)

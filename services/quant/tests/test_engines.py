@@ -7,8 +7,14 @@ from quant.paper import COSTS, check_exit, crypto_market_fill, equity_open_fill,
 from quant.providers.base import Bar, OrderBook
 from quant.regime import crypto_regime, equity_regime
 from quant.risk import OpenPosition, PortfolioView, RiskEngine, final_decision
-from quant.strategies import (CryptoMomentumFundingOI, CryptoSpotPerpDivergence, EquityBreakoutMomentum, EquityRelativeStrength,
-                              EquityVolumeAnomaly, StrategyRegistry)
+from quant.strategies import (
+    CryptoMomentumFundingOI,
+    CryptoSpotPerpDivergence,
+    EquityBreakoutMomentum,
+    EquityRelativeStrength,
+    EquityVolumeAnomaly,
+    StrategyRegistry,
+)
 from tests.helpers import daily
 
 NOW = datetime(2026, 9, 22, 21, 0, tzinfo=timezone.utc)
@@ -175,3 +181,12 @@ def test_exit_gap_and_same_bar_conflict_are_conservative():
     calm = [Bar(ts=t, open=100, high=101, low=99, close=100, volume=1, is_final=True)]
     assert check_exit("long", 95, 110, t, calm, timedelta(days=1), True).reason == "time"
     assert COSTS["crypto"].fee_bps == 10.0
+
+
+def test_strategy_loss_limit_blocks_new_entries_of_that_strategy_only():
+    ev = EquityBreakoutMomentum().evaluate(fs_of(BREAKOUT), RISK_ON)
+    losing = PortfolioView(100_000, 100_000, (), strategy_day_pnl={"equity_breakout_momentum": -1_500.0})
+    r = RiskEngine().assess(ev, fs_of(BREAKOUT), "equity", losing)
+    assert not r.approved and any(c.name == "strategy_loss_limit" and not c.passed for c in r.checks)
+    other = PortfolioView(100_000, 100_000, (), strategy_day_pnl={"equity_relative_strength": -5_000.0})
+    assert RiskEngine().assess(ev, fs_of(BREAKOUT), "equity", other).approved

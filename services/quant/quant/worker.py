@@ -16,11 +16,10 @@ import logging
 import random
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+from datetime import datetime, timezone
 
 import psycopg
-
-from datetime import datetime, timezone
 
 from .heartbeat import beat
 from .runtime import build, stop_event

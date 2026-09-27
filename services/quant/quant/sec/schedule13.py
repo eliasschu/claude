@@ -12,6 +12,7 @@ Live-Einreichungen noch zu verifizieren.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .xml import SecParseError, iter_local, num, parse, text
 
@@ -39,7 +40,7 @@ def schedule_of(form: str) -> tuple[str, bool]:
     raise ValueError(f"kein Schedule 13D/G: {form}")
 
 
-def _first(node, tags) -> str | None:
+def _first(node, tags) -> str | None:  # noqa: D103
     for t in tags:
         for el in iter_local(node, t):
             v = text(el)
@@ -57,7 +58,7 @@ def parse_schedule13(form: str, document: str) -> Schedule13:
         root = parse(document)
     except SecParseError:
         return Schedule13(schedule, amendment, "metadata_only")
-    persons = []
+    persons: list[dict[str, Any]] = []
     # Je meldender Person ein Block mit eigenem Anteil (gemeinsame Meldungen mehrerer Personen)
     blocks = [b for t in ("reportingPersonInfo", "reportingPersons", "coverPageHeaderReportingPersonDetails") for b in iter_local(root, t)]
     for b in blocks or [root]:

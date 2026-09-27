@@ -20,13 +20,13 @@ Ausschliesslich Paper - es gibt keinen Pfad zu einer echten Order.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from typing import Iterable, Literal, Sequence
+from typing import Literal
 from zoneinfo import ZoneInfo
 
-import psycopg
-
+from .db import Conn, one
 from .providers.base import Bar, OrderBook
 from .risk import OpenPosition, PortfolioView
 
@@ -163,7 +163,7 @@ class DuplicateEntryError(Exception):
 
 
 class PaperPortfolio:
-    def __init__(self, conn: psycopg.Connection, account_id: str, base_currency: str = "USD", starting_cash: float = 100_000.0):
+    def __init__(self, conn: Conn, account_id: str, base_currency: str = "USD", starting_cash: float = 100_000.0):
         self._conn = conn
         self.account_id = account_id
         conn.execute(
@@ -173,14 +173,14 @@ class PaperPortfolio:
 
     # -- Zustand ------------------------------------------------------------
     def cash(self) -> float:
-        row = self._conn.execute(
+        row = one(self._conn.execute(
             """SELECT a.starting_cash - COALESCE(SUM(CASE WHEN o.side='buy' THEN f.price*f.quantity + f.fee
                                                           ELSE -(f.price*f.quantity) + f.fee END), 0) AS cash
                FROM paper_accounts a LEFT JOIN paper_orders o ON o.account_id=a.account_id
                LEFT JOIN paper_fills f ON f.order_id=o.order_id
                WHERE a.account_id=%s GROUP BY a.starting_cash""",
             (self.account_id,),
-        ).fetchone()
+        ))
         return float(row["cash"])
 
     def open_positions(self) -> list[dict]:
@@ -210,7 +210,7 @@ class PaperPortfolio:
         return PortfolioView(equity=cash + mtm, cash=cash, positions=tuple(positions), kill_switch_reason=kill_switch_reason)
 
     def _asset_class(self, instrument_id: str) -> str:
-        return self._conn.execute("SELECT asset_class FROM instruments WHERE instrument_id=%s", (instrument_id,)).fetchone()["asset_class"]
+        return one(self._conn.execute("SELECT asset_class FROM instruments WHERE instrument_id=%s", (instrument_id,)))["asset_class"]
 
     def active_entry_orders(self) -> list[dict]:
         return self._conn.execute(
@@ -297,9 +297,9 @@ class PaperPortfolio:
     def close_position(self, position: dict, fill: Fill, reason: str) -> float:
         side: Side = "sell" if position["side"] == "long" else "buy"
         order_id = uuid.uuid4()
-        entry_fee = self._conn.execute(
+        entry_fee = one(self._conn.execute(
             """SELECT COALESCE(SUM(f.fee),0) AS fee FROM paper_orders o JOIN paper_fills f USING (order_id)
-               WHERE o.position_id=%s AND o.intent='open'""", (position["position_id"],)).fetchone()["fee"]
+               WHERE o.position_id=%s AND o.intent='open'""", (position["position_id"],)))["fee"]
         sign = 1 if position["side"] == "long" else -1
         pnl = sign * (fill.price - position["entry_price"]) * position["quantity"] - fill.fee - entry_fee
         with self._conn.transaction():
@@ -318,10 +318,10 @@ class PaperPortfolio:
         return pnl
 
     def realized_pnl_since(self, since: datetime) -> float:
-        row = self._conn.execute(
+        row = one(self._conn.execute(
             "SELECT COALESCE(SUM(realized_pnl),0) AS p FROM paper_positions WHERE account_id=%s AND closed_at >= %s",
             (self.account_id, since),
-        ).fetchone()
+        ))
         return float(row["p"])
 
     def closed_positions(self, limit: int = 200) -> Iterable[dict]:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from statistics import fmean, pstdev
 
-import psycopg
 from psycopg.types.json import Jsonb
 
+from .db import Conn
 from .providers.cftc import cot_available_at
 
 # Beispiel-Kontrakte (CFTC-Codes laut CFTC; vor Nutzung live pruefen)
@@ -19,7 +19,7 @@ DEFAULT_CONTRACTS = {
 }
 
 
-def store_cot(conn: psycopg.Connection, rows: list[dict], *, received_at: datetime, mode: str = "live",
+def store_cot(conn: Conn, rows: list[dict], *, received_at: datetime, mode: str = "live",
               historical_latency: timedelta = timedelta(minutes=5)) -> int:
     """Neue Berichte speichern; geaenderte Werte eines bekannten Stichtags werden als neue Revision abgelegt."""
     n = 0
@@ -40,7 +40,7 @@ def store_cot(conn: psycopg.Connection, rows: list[dict], *, received_at: dateti
     return n
 
 
-def positioning_as_of(conn: psycopg.Connection, contract_code: str, report_type: str, category: str, as_of: datetime,
+def positioning_as_of(conn: Conn, contract_code: str, report_type: str, category: str, as_of: datetime,
                       lookback_weeks: int = 156) -> dict | None:
     """Netto-Positionierung einer Kategorie mit Wochenaenderung, z-Score und Perzentil (nur zum Zeitpunkt as_of bekannte Berichte)."""
     rows = conn.execute(

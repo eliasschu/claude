@@ -31,6 +31,7 @@ class RiskLimits:
     max_atr_pct_equity: float = 8.0
     max_realized_vol_crypto_pct: float = 150.0
     allow_shorts: bool = False  # Short-Simulation ohne Leihe/Funding-Kosten waere unrealistisch
+    strategy_daily_loss_pct: float = 1.0  # Tagesverlust je Strategie, danach keine neuen Einstiege dieser Strategie
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,8 @@ class PortfolioView:
     cash: float
     positions: tuple[OpenPosition, ...]
     kill_switch_reason: str | None = None
+    # realisierter Tagesergebnis je Strategie (UTC-Tag)
+    strategy_day_pnl: dict = field(default_factory=dict)
 
 
 class RiskEngine:
@@ -63,6 +66,9 @@ class RiskEngine:
             checks.append(RiskCheck(name, passed, detail))
 
         check("kill_switch", pf.kill_switch_reason is None, pf.kill_switch_reason or "nicht aktiv")
+        day = pf.strategy_day_pnl.get(ev.strategy_id, 0.0)
+        limit = pf.equity * L.strategy_daily_loss_pct / 100
+        check("strategy_loss_limit", day > -limit, f"Tagesergebnis der Strategie {day:,.2f} (Limit -{limit:,.2f})")
         check("short_allowed", ev.direction == "long" or L.allow_shorts,
               "Long" if ev.direction == "long" else "Short-Simulation ohne Leihe/Funding-Kosten ist noch nicht realistisch - abgelehnt.")
 

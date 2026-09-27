@@ -19,9 +19,10 @@ import asyncio
 import json
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
@@ -97,7 +98,7 @@ class WsStream:
                         if asyncio.iscoroutine(res):
                             await res
                     stable = await self._receive(ws, stop)
-            except (OSError, asyncio.TimeoutError, ConnectionClosed, InvalidHandshake, InvalidURI) as exc:
+            except (TimeoutError, OSError, ConnectionClosed, InvalidHandshake, InvalidURI) as exc:
                 self.status.last_error = f"{type(exc).__name__}: {exc}"[:200]
             if stop.is_set():
                 break
@@ -130,7 +131,7 @@ class WsStream:
                 # Kurzer Takt: Stop-Signal wird spaetestens nach 1 s bemerkt (sauberes Herunterfahren bei SIGTERM).
                 # recv() abzubrechen ist in websockets verlustfrei.
                 raw = await asyncio.wait_for(ws.recv(), timeout=POLL_S)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 idle += POLL_S
                 if self.spec.stale_after is not None and idle >= self.spec.stale_after:
                     self.status.last_error = f"keine Nachricht seit {self.spec.stale_after} s (stale)"
@@ -160,5 +161,5 @@ class WsStream:
 async def _sleep(stop: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop.wait(), timeout=seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass

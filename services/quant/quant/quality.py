@@ -7,9 +7,9 @@ repariert oder geschaetzt.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Sequence
 
 from .providers.base import Bar
 

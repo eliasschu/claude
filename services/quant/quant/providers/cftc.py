@@ -27,7 +27,7 @@ BASE = "https://publicreporting.cftc.gov/resource"
 DATASETS = {"legacy": "6dca-aqww", "disaggregated": "72hh-3qpy", "tff": "gpe5-46if"}
 
 # Kategorie -> (Long-, Short-, Spread-Feldkandidaten). Mehrere Kandidaten, weil die Feldnamen je Bericht leicht abweichen.
-CATEGORIES = {
+CATEGORIES: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]]] = {
     "legacy": {
         "commercial": (("comm_positions_long_all",), ("comm_positions_short_all",), ()),
         "non_commercial": (("noncomm_positions_long_all",), ("noncomm_positions_short_all",),
@@ -80,8 +80,8 @@ def normalize(report_type: str, row: dict[str, Any]) -> dict:
     if not rd or not code or not name:
         raise ValueError("Pflichtfeld fehlt (Stichtag/Kontrakt/Markt)")
     cats = {}
-    for cat, (l, s, sp) in CATEGORIES[report_type].items():
-        long_, short = _pick(row, l), _pick(row, s)
+    for cat, (long_names, short_names, sp) in CATEGORIES[report_type].items():
+        long_, short = _pick(row, long_names), _pick(row, short_names)
         if long_ is None and short is None:
             continue
         cats[cat] = {"long": long_, "short": short, "spread": _pick(row, sp) if sp else None}

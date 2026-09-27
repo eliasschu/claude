@@ -14,43 +14,43 @@ from __future__ import annotations
 import threading
 import time as _time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta, timezone
-from typing import Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from . import BOT_VERSION
 from .audit import SignalAuditService, SignalContext
+from .db import Conn, one
 from .domain import Decision, FeatureSet, RegimeState, StrategyEvaluation
 from .events import BotEventLog
-from .metrics import METRICS, Metrics
+from .execution import ExecutionModel, vol_1m_bps_from_annual_pct
 from .features import CryptoInputs, EquityInputs, crypto_features, equity_close_time, equity_features
 from .freshness import assess
 from .health import KillSwitchLimits, ProviderHealthService, kill_switch_reason
-from .paper import COSTS, DuplicateEntryError, PaperPortfolio, check_exit, crypto_market_fill, equity_open_fill, exit_fill, session_open
-from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, PremiumIndex, ProviderError, Quote
+from .metrics import METRICS, Metrics
+from .paper import DuplicateEntryError, PaperPortfolio, check_exit, session_open
+from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, PremiumIndex, ProviderError, Quote, Sourced
 from .providers.registry import Providers
 from .quality import validate_bars
 from .regime import crypto_regime, equity_regime
 from .repo import load_bars, load_flow, observations_as_of, record_observation, upsert_bars
-from .ws.flow_features import add_flow_features
 from .risk import RiskEngine, final_decision
 from .shadow import record_shadow
 from .signal_state import SignalGate
-from .strategies import StrategyRegistry, run_signal_engine
+from .strategies import StrategyRegistry
 from .universe import ETFS, crypto_instrument, equity_instrument, parse_pair
+from .ws.flow_features import add_flow_features
 
 NEW_YORK = ZoneInfo("America/New_York")
-CRYPTO_BACKFILL = timedelta(days=7)
 # Ein Kandidat wird nicht jede Minute neu protokolliert, sondern bei Aenderung oder nach Ablauf dieser Frist.
 REPEAT_AFTER = {"intraday": timedelta(hours=1), "swing": timedelta(days=1), "position": timedelta(days=5)}
 STRENGTH_CHANGE = 10.0
-# Teilausfuehrung: mindestens die Haelfte muss das Buch tragen; der Rest bleibt 5 Minuten aktiv
-MIN_FILL_RATIO = 0.5
+# Teilausfuehrung (Mindestquote im ExecutionModel): der Rest bleibt 5 Minuten aktiv
 PARTIAL_TIME_IN_FORCE = timedelta(minutes=5)
 
 Clock = Callable[[], datetime]
@@ -87,14 +87,14 @@ class _CryptoLive:
 
 @dataclass
 class _Bundle:
-    spot_pages: list = field(default_factory=list)
-    perp: object | None = None
-    daily: object | None = None
-    quote: object | None = None
-    book: object | None = None
-    premium: object | None = None
-    funding: object | None = None
-    oi: object | None = None
+    spot_pages: list[Sourced[Any]] = field(default_factory=list)
+    perp: Sourced[Any] | None = None
+    daily: Sourced[Any] | None = None
+    quote: Sourced[Any] | None = None
+    book: Sourced[Any] | None = None
+    premium: Sourced[Any] | None = None
+    funding: Sourced[Any] | None = None
+    oi: Sourced[Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -108,13 +108,14 @@ class _Call:
 
 
 class BotOrchestrator:
-    def __init__(self, conn: psycopg.Connection, providers: Providers, *, mode: str, account_id: str, starting_cash: float,
+    def __init__(self, conn: Conn, providers: Providers, *, mode: str, account_id: str, starting_cash: float,
                  crypto_symbols: tuple[str, ...], equity_symbols: tuple[str, ...], registry: StrategyRegistry | None = None,
                  risk: RiskEngine | None = None, events: BotEventLog | None = None, clock: Clock = utc_now,
                  kill_limits: KillSwitchLimits = KillSwitchLimits(), benchmark_equity: str = "SPY", benchmark_crypto: str = "BTCUSDT",
-                 shadow: bool = True, gate: SignalGate | None = None):
-        if mode not in ("research", "paper"):
-            raise ValueError("Nur research oder paper - Live-Handel ist gesperrt")
+                 shadow: bool = True, gate: SignalGate | None = None, execution: ExecutionModel | None = None,
+                 history_window: timedelta = timedelta(days=7)):
+        if mode not in ("research", "paper", "backtest"):
+            raise ValueError("Nur research, paper oder backtest - Live-Handel ist gesperrt")
         self.conn = conn
         self.p = providers
         self.mode = mode
@@ -133,10 +134,13 @@ class BotOrchestrator:
         self.starting_cash = starting_cash
         self.metrics: Metrics = METRICS
         self.shadow = shadow
+        self.execution = execution or ExecutionModel.from_env()
+        self.history_window = history_window
+        self._vol_bps: dict[str, float] = {}
         self.gate = gate or SignalGate()
         self.gate.warm_start(conn, clock())
         self._rep_lock = threading.Lock()
-        self._lkg: dict[tuple[str, str], object] = {}
+        self._lkg: dict[tuple[str, str], Sourced[Any]] = {}
         conn.commit()
 
     # ------------------------------------------------------------------ Zyklus
@@ -147,7 +151,7 @@ class BotOrchestrator:
         Wer sie nicht bekommt, ueberspringt den Takt statt doppelte Signale zu erzeugen.
         """
         key = f"cycle:{self.mode}:{scope}"
-        got = self.conn.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS ok", (key,)).fetchone()["ok"]
+        got = one(self.conn.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS ok", (key,)))["ok"]
         self.conn.commit()
         if not got:
             return None
@@ -208,7 +212,8 @@ class BotOrchestrator:
                 raise ProviderError(source_id, "invalid", f"Antwort unbrauchbar ({exc.__class__.__name__})") from exc
         except ProviderError as exc:
             with self._rep_lock:
-                if exc.reason in ("unavailable", "rate_limited", "not_configured"):
+                # Nur echte Ausfaelle sperren die Quelle fuer den Zyklus; "not_configured" betrifft eine einzelne Datenart
+                if exc.reason in ("unavailable", "rate_limited"):
                     rep.down_sources.add(source_id)
                 rep.errors.append(f"{source_id}:{what}")
                 rep.calls.append(_Call(source_id, what, instrument_id, None, (_time.monotonic() - started) * 1000, exc))
@@ -280,7 +285,7 @@ class BotOrchestrator:
         crypto = self.p.crypto
         bundle = _Bundle()
         # Spot 1m: fehlende Historie seitenweise nachladen (max. 7 Tage)
-        start = (last_spot_ts + timedelta(minutes=1)) if last_spot_ts else now - CRYPTO_BACKFILL
+        start = (last_spot_ts + timedelta(minutes=1)) if last_spot_ts else now - self.history_window
         for _ in range(12):
             r = self._with_fallback(rep, "spot_bars", lambda p, s=start: p.spot_bars(symbol, "1m", 1000, s), spot_id)
             if r is None or not r.data:
@@ -327,11 +332,16 @@ class BotOrchestrator:
             record_observation(self.conn, "perp_premium", pi.source_id, pi.data.ts, pi.data.mark_price, instrument_id=perp_id,
                                value_json={"index": pi.data.index_price, "last_funding_rate": pi.data.last_funding_rate}, received_at=now)
         if bundle.funding:
-            for f in bundle.funding.data:
+            # Nur neue Abrechnungen pruefen (bekannte Zeitpunkte sind unveraenderlich gespeichert)
+            known = one(self.conn.execute("SELECT max(event_time) AS t FROM observations WHERE series_key='funding_rate' AND instrument_id=%s",
+                                      (perp_id,)))["t"]
+            for f in (x for x in bundle.funding.data if known is None or x.ts >= known):
                 record_observation(self.conn, "funding_rate", bundle.funding.source_id, f.ts, f.rate, instrument_id=perp_id,
                                    value_json={"interval_hours": f.interval_hours}, received_at=now, available_at=f.ts)
         if bundle.oi:
-            for p in bundle.oi.data:
+            known = one(self.conn.execute("SELECT max(event_time) AS t FROM observations WHERE series_key='open_interest' AND instrument_id=%s",
+                                      (perp_id,)))["t"]
+            for p in (x for x in bundle.oi.data if known is None or x.ts >= known):
                 # Der 5-Minuten-Wert ist erst nach Ende des Intervalls bekannt
                 record_observation(self.conn, "open_interest", bundle.oi.source_id, p.ts, p.contracts, instrument_id=perp_id,
                                    value_json={"notional": p.notional}, received_at=now, available_at=p.ts + timedelta(minutes=5))
@@ -352,7 +362,7 @@ class BotOrchestrator:
 
     def _crypto_features(self, spot_id: str, perp_id: str, live: _CryptoLive, as_of: datetime) -> FeatureSet:
         primary = self.p.crypto.source_id
-        spot = load_bars(self.conn, spot_id, "1m", as_of - CRYPTO_BACKFILL, as_of, prefer_source=primary)
+        spot = load_bars(self.conn, spot_id, "1m", as_of - self.history_window, as_of, prefer_source=primary)
         perp = load_bars(self.conn, perp_id, "1m", as_of - timedelta(hours=4), as_of, prefer_source=primary)
         funding = [FundingRate(r["event_time"], r["value"], (r["value_json"] or {}).get("interval_hours", 8.0))
                    for r in observations_as_of(self.conn, "funding_rate", perp_id, as_of - timedelta(days=30), as_of)]
@@ -369,8 +379,8 @@ class BotOrchestrator:
     def _crypto_cycle(self, rep: CycleReport) -> None:
         self.events.emit("cycle_started", f"Krypto-Zyklus gestartet ({len(self.crypto_symbols)} Paare)", cycle_id=rep.cycle_id)
         ids = {sym: self._crypto_ids(sym) for sym in self.crypto_symbols}
-        last_ts = {sym: self.conn.execute("SELECT max(ts) AS t FROM bars WHERE instrument_id=%s AND timeframe='1m'",
-                                          (spot,)).fetchone()["t"] for sym, (spot, _perp) in ids.items()}
+        last_ts = {sym: one(self.conn.execute("SELECT max(ts) AS t FROM bars WHERE instrument_id=%s AND timeframe='1m'",
+                                          (spot,)))["t"] for sym, (spot, _perp) in ids.items()}
         self.conn.commit()
         # Abrufe je Paar parallel (I/O-gebunden); Datenbankschreiben danach seriell
         with ThreadPoolExecutor(max_workers=max(1, min(8, len(ids)))) as pool:
@@ -385,6 +395,10 @@ class BotOrchestrator:
             ingested[sym] = (spot, perp, self._store_crypto(rep, sym, spot, perp, bundles[sym]))
         as_of = self.clock()
         feats = {sym: self._crypto_features(s, p, live, as_of) for sym, (s, p, live) in ingested.items()}
+        for sym, fs in feats.items():  # Minutenvolatilitaet fuer das volatilitaetsabhaengige Slippage-Modell
+            vol = vol_1m_bps_from_annual_pct(fs.raw("realized_vol_60m_pct")) if fs.has("realized_vol_60m_pct") else None
+            if vol is not None:
+                self._vol_bps[ingested[sym][0]] = vol
 
         # Regime: BTC-Tagesbalken + BTC-Funding
         btc = ingested.get(self.benchmark_crypto)
@@ -395,7 +409,7 @@ class BotOrchestrator:
         self._store_regime(rep, regime)
 
         # Datenqualitaet / Kill Switch
-        marks = {spot_id: feats[sym].values["close"].raw for sym, (spot_id, _p, _l) in ingested.items() if "close" in feats[sym].values}
+        marks = {spot_id: feats[sym].raw("close") for sym, (spot_id, _p, _l) in ingested.items() if feats[sym].has("close")}
         stale_core = []
         if not btc_fs or "close" not in btc_fs.values or btc_fs.values["close"].freshness in ("stale", "unknown"):
             stale_core.append(f"{self.benchmark_crypto} Spot")
@@ -434,7 +448,7 @@ class BotOrchestrator:
         for t in tickers:
             iid = equity_instrument(self.conn, t, is_etf=t in ETFS)
             ids[t] = iid
-            last = self.conn.execute("SELECT max(ts) AS t FROM bars WHERE instrument_id=%s AND timeframe='1d'", (iid,)).fetchone()["t"]
+            last = one(self.conn.execute("SELECT max(ts) AS t FROM bars WHERE instrument_id=%s AND timeframe='1d'", (iid,)))["t"]
             start = (last - timedelta(days=10)).date() if last else (now - timedelta(days=800)).date()
             r = self._provider_call(rep, src, "daily_bars", lambda t=t, s=start: self.p.market.bars(t, "1d", s), iid)
             if r:
@@ -450,7 +464,7 @@ class BotOrchestrator:
         self._store_regime(rep, regime)
 
         feats = {t: equity_features(EquityInputs(ids[t], daily[t], bench, src, as_of)) for t in self.equity_symbols}
-        marks = {ids[t]: fs.values["close"].raw for t, fs in feats.items() if "close" in fs.values}
+        marks = {ids[t]: fs.raw("close") for t, fs in feats.items() if fs.has("close")}
         bench_fresh = assess("candle_1d_equity", equity_close_time(bench[-1]), as_of) if bench else None
         stale = [] if bench_fresh and bench_fresh.usable else [f"{self.benchmark_equity} Tageskurse"]
         rep.kill_switch = self._kill_switch(rep, marks, stale, src)
@@ -515,6 +529,12 @@ class BotOrchestrator:
             self.events.emit("kill_switch", f"Kill Switch aktiv: {reason}. Keine neuen Orders.", severity="critical", cycle_id=rep.cycle_id)
         return reason
 
+    def _strategy_day_pnl(self, now: datetime) -> dict[str, float]:
+        day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        rows = self.conn.execute("""SELECT s.strategy_id, sum(p.realized_pnl) AS pnl FROM paper_positions p JOIN signals s USING (signal_id)
+                                    WHERE p.account_id=%s AND p.closed_at >= %s GROUP BY 1""", (self.portfolio.account_id, day)).fetchall()
+        return {r["strategy_id"]: r["pnl"] or 0.0 for r in rows}
+
     def _holding(self, instrument_id: str, strategy_id: str) -> bool:
         return self.conn.execute(
             """SELECT 1 FROM paper_positions p JOIN signals s USING (signal_id)
@@ -557,7 +577,7 @@ class BotOrchestrator:
             # Kandidaten ANDERER Strategien laufen weiter durch die Risk Engine (dort: "bereits offene Position").
             rep.bump("holding")
             return
-        view = self.portfolio.view(marks, rep.kill_switch)
+        view = replace(self.portfolio.view(marks, rep.kill_switch), strategy_day_pnl=self._strategy_day_pnl(now))
         risk = self.risk.assess(ev, fs, asset_class, view)
         decision = final_decision(ev, risk)
         rep.bump(decision.value)
@@ -588,11 +608,12 @@ class BotOrchestrator:
                          payload={"decision": decision.value, "strength": ev.strength, "strategy_id": ev.strategy_id})
         if self.shadow and ev.decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE):
             # Shadow: geplante Order + spaetere hypothetische Ausfuehrung fuer JEDE Handelsidee, auch abgelehnte
-            if record_shadow(self.conn, signal_id=signal_id, ev=ev, risk=risk, now=now, asset_group=asset_class, snapshot_id=snapshot_id):
+            if record_shadow(self.conn, signal_id=signal_id, ev=ev, risk=risk, now=now, asset_group=asset_class, snapshot_id=snapshot_id,
+                             execution=self.execution, vol_1m_bps=self._vol_bps.get(instrument_id)):
                 rep.bump("shadow_recorded")
                 self.metrics.inc("orders_simulated_total", kind="shadow", strategy=ev.strategy_id)
-        if self.mode == "paper" and risk.approved and decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE) and ev.exit_plan:
-            cost = COSTS["crypto" if asset_class == "crypto" else "equity"]
+        if self.mode in ("paper", "backtest") and risk.approved and decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE) and ev.exit_plan:
+            cost = self.execution.cost("crypto" if asset_class == "crypto" else "equity")
             try:
                 order_id = self.portfolio.place_entry(
                     signal_id=signal_id, instrument_id=instrument_id, side="buy" if ev.direction == "long" else "sell",
@@ -619,8 +640,8 @@ class BotOrchestrator:
                 self.portfolio.reject(o["order_id"], "Restmenge verfallen (Time in Force)")
                 rep.bump("paper_partial_expired")
                 continue
-            fill = crypto_market_fill(o["side"], remaining, live.book, q.bid if q else None, q.ask if q else None, now,
-                                      min_fill_ratio=MIN_FILL_RATIO)
+            fill = self.execution.market_fill(o["side"], remaining, book=live.book, bid=q.bid if q else None, ask=q.ask if q else None,
+                                              at=now, venue=self.p.crypto.source_id, vol_1m_bps=self._vol_bps.get(o["instrument_id"]))
             if fill is None:
                 self.portfolio.reject(o["order_id"], "Kein Kurs oder Orderbuch trägt die Größe nicht")
                 rep.bump("paper_rejected")
@@ -644,7 +665,7 @@ class BotOrchestrator:
             nxt = next((b for b in bars if session_open(b) >= o["eligible_at"]), None)
             if nxt is None:
                 continue  # naechste Eroeffnung noch nicht vorhanden (Wochenende, Feiertag, Daten fehlen)
-            fill = equity_open_fill(o["side"], o["quantity"] - o["filled_quantity"], nxt)
+            fill = self.execution.open_fill(o["side"], o["quantity"] - o["filled_quantity"], nxt)
             if o["side"] == "buy" and fill.price * fill.quantity + fill.fee > self.portfolio.cash():
                 self.portfolio.reject(o["order_id"], "Nicht genug Paper-Kapital")
                 continue
@@ -665,7 +686,8 @@ class BotOrchestrator:
             ev = check_exit(p["side"], p["stop_price"], p["target_price"], p["time_exit_at"], bars, length, group == "equity")
             if ev is None:
                 continue
-            fill = exit_fill(p["side"], p["quantity"], ev, COSTS[group])
+            fill = self.execution.exit(p["side"], p["quantity"], ev, group, venue=self.p.crypto.source_id if group == "crypto" else None,
+                                       vol_1m_bps=self._vol_bps.get(p["instrument_id"]))
             pnl = self.portfolio.close_position(p, fill, ev.reason)
             rep.bump("paper_exits")
             self.events.emit("paper_exit", f"Paper-Position geschlossen ({ev.reason}{', Kurslücke' if ev.gap else ''}): Ergebnis {pnl:,.2f}",

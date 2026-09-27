@@ -61,7 +61,7 @@ def test_corrupt_payload_and_missing_field_do_not_crash_cycle(db):
     crypto = FakeCrypto(clock, uptrend)
     crypto.premium_index = lambda s: (_ for _ in ()).throw(KeyError("markPrice"))      # Feld fehlt
     crypto.open_interest_history = lambda *a: (_ for _ in ()).throw(ValueError("kein JSON"))  # kaputte Antwort
-    rep = _bot(db, clock, crypto).run_crypto_cycle()
+    _bot(db, clock, crypto).run_crypto_cycle()
     assert db.execute("SELECT status FROM bot_cycles").fetchone()["status"] in ("completed", "halted")
     msgs = [e["message"] for e in db.execute("SELECT message FROM bot_events WHERE event_type='provider_error'").fetchall()]
     assert any("unbrauchbar (KeyError)" in m for m in msgs) and any("unbrauchbar (ValueError)" in m for m in msgs)
@@ -143,6 +143,7 @@ def test_parallel_fetch_keeps_cycle_short_when_provider_is_slow(db):
 def test_fred_timeout_does_not_block_cftc(db, monkeypatch):
     """FRED haengt: COT wird trotzdem abgeglichen, der Scheduler laeuft weiter."""
     from datetime import datetime, timezone
+
     from quant import scheduler
     from quant.providers.cftc import CftcProvider
     from quant.providers.fred import FredProvider

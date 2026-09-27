@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-import psycopg
-
+from .db import Conn
 from .repo import ensure_instrument, resolve
 
 
@@ -29,7 +28,7 @@ def _new_id(*parts: str) -> str:
     return "ins_" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
 
 
-def crypto_instrument(conn: psycopg.Connection, pair: CryptoPair, venue: str = "binance", kind: str = "crypto_spot") -> str:
+def crypto_instrument(conn: Conn, pair: CryptoPair, venue: str = "binance", kind: str = "crypto_spot") -> str:
     scheme_value = pair.symbol if kind == "crypto_spot" else f"{pair.symbol}:PERP"
     existing = resolve(conn, "exchange_symbol", scheme_value, venue)
     if existing:
@@ -41,7 +40,7 @@ def crypto_instrument(conn: psycopg.Connection, pair: CryptoPair, venue: str = "
     return iid
 
 
-def equity_instrument(conn: psycopg.Connection, ticker: str, is_etf: bool = False) -> str:
+def equity_instrument(conn: Conn, ticker: str, is_etf: bool = False) -> str:
     t = ticker.strip().upper()
     existing = resolve(conn, "ticker", t, "US")
     if existing:

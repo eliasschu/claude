@@ -12,8 +12,8 @@ Fehlen Daten, lautet das Label INSUFFICIENT_DATA - es wird kein Regime geraten.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Sequence
 
 from .domain import RegimeState
 from .features import final_bars, final_equity_bars, percentile_rank, realized_vol_pct, rolling_series, sma
@@ -30,6 +30,7 @@ def _trend(closes: Sequence[float]) -> tuple[str, dict[str, float | None]]:
     feats = {"close": last, "sma50": s50, "sma200": s200, "sma50_slope_20_pct": slope}
     if s50 is None or s200 is None or slope is None:
         return "INSUFFICIENT_DATA", feats
+    assert last is not None  # s50 existiert -> es gibt Schlusskurse
     if last > s50 > s200 and slope > 0:
         return "TRENDING_UP", feats
     if last < s50 < s200 and slope < 0:
@@ -89,10 +90,10 @@ def equity_regime(benchmark_daily: Sequence[Bar], universe_daily: dict[str, Sequ
     labels = [trend, vol, _risk(trend, vol, breadth)]
     if breadth is not None:
         labels.append("BROAD_MARKET" if breadth >= 60 else "NARROW_MARKET" if breadth <= 40 else "")
-    labels = [l for l in dict.fromkeys(labels) if l]
+    labels = [lab for lab in dict.fromkeys(labels) if lab]
     feats = {**tf, **vf, "breadth_above_sma50_pct": breadth, "breadth_universe_size": float(len(above))}
     note = "" if breadth is not None else " Marktbreite nicht berechnet (weniger als 8 Werte mit Historie)."
-    return RegimeState("equity_us", tuple(labels), "; ".join(TEXT[l] for l in labels) + "." + note, feats, REGIME_VERSION, as_of)
+    return RegimeState("equity_us", tuple(labels), "; ".join(TEXT[lab] for lab in labels) + "." + note, feats, REGIME_VERSION, as_of)
 
 
 def crypto_regime(btc_daily: Sequence[Bar], funding_z: float | None, as_of: datetime) -> RegimeState:
@@ -105,4 +106,4 @@ def crypto_regime(btc_daily: Sequence[Bar], funding_z: float | None, as_of: date
         labels.append("LEVERAGE_ELEVATED")
     labels = list(dict.fromkeys(labels))
     feats = {**tf, **vf, "btc_funding_zscore": funding_z}
-    return RegimeState("crypto", tuple(labels), "; ".join(TEXT[l] for l in labels) + ".", feats, REGIME_VERSION, as_of)
+    return RegimeState("crypto", tuple(labels), "; ".join(TEXT[lab] for lab in labels) + ".", feats, REGIME_VERSION, as_of)

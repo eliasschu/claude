@@ -9,9 +9,9 @@ duerfen hineingereicht werden (repo.load_flow sorgt dafuer). Aggregationsfenster
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from statistics import median, pstdev
-from typing import Sequence
 
 from ..domain import FeatureSet, FeatureValue
 from ..freshness import assess

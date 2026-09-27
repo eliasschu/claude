@@ -60,7 +60,7 @@ def parse_submissions(raw: dict[str, Any], cik: str) -> list[FilingRef]:
     acc = recent.get("accessionNumber") or []
     out = []
     for i, a in enumerate(acc):
-        def col(name):
+        def col(name, i=i):
             v = recent.get(name) or []
             return v[i] if i < len(v) else None
         try:

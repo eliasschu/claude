@@ -11,14 +11,14 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 
-import psycopg
 from psycopg.types.json import Jsonb
 
+from ..db import Conn, one
 from ..providers.base import ProviderError
 from .client import FilingRef, SecClient, available_at
 from .form4 import CLASSIFICATION_VERSION, parse_form4
 from .schedule13 import parse_schedule13
-from .thirteenf import parse_cover, parse_info_table, position_changes, Holding
+from .thirteenf import Holding, parse_cover, parse_info_table, position_changes
 from .xml import SecParseError
 
 log = logging.getLogger("quant.sec")
@@ -28,7 +28,7 @@ THIRTEEN_F = {"13F-HR", "13F-HR/A"}
 SCHEDULE_13 = {"SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A", "SCHEDULE 13D", "SCHEDULE 13D/A", "SCHEDULE 13G", "SCHEDULE 13G/A"}
 
 
-def _known(conn: psycopg.Connection, accessions: list[str]) -> set[str]:
+def _known(conn: Conn, accessions: list[str]) -> set[str]:
     if not accessions:
         return set()
     return {r["accession"] for r in conn.execute("SELECT accession FROM sec_filings WHERE accession = ANY(%s)", (accessions,)).fetchall()}
@@ -50,7 +50,7 @@ class SecIngestor:
                        haette wissen koennen). Nie frueher als die Veroeffentlichung.
     """
 
-    def __init__(self, conn: psycopg.Connection, client: SecClient, clock, mode: str = "live",
+    def __init__(self, conn: Conn, client: SecClient, clock, mode: str = "live",
                  historical_latency: timedelta = timedelta(minutes=5)):
         if mode not in ("live", "historical"):
             raise ValueError("mode: live | historical")
@@ -209,7 +209,7 @@ def latest_13f_changes(conn, manager_cik: str, as_of: datetime) -> dict | None:
     keys = sorted(periods)
     cur = keys[-1]
     prev = keys[-2] if len(keys) > 1 else None
-    avail = conn.execute(f"""SELECT max(available_at) AS a FROM institutional_holdings WHERE manager_cik=%s AND report_period=%s
-                             AND {_knowable()}""", (str(int(manager_cik)), cur, as_of)).fetchone()["a"]
+    avail = one(conn.execute(f"""SELECT max(available_at) AS a FROM institutional_holdings WHERE manager_cik=%s AND report_period=%s
+                             AND {_knowable()}""", (str(int(manager_cik)), cur, as_of)))["a"]
     return {"report_period": cur, "previous_period": prev, "available_at": avail,
             "data_age_days": (as_of.date() - cur).days, "changes": position_changes(periods.get(prev) if prev else None, periods[cur])}
