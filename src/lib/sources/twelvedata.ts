@@ -17,11 +17,12 @@ async function parseChecked(response: Response): Promise<unknown> {
   return body;
 }
 
-function meta(fetchedAt: string, observedAt: string | null, stale: boolean, staleReason: string | undefined, maxAgeMs: number, precision: "minute" | "day" = "minute"): DataMeta {
+function meta(fetchedAt: string, observedAt: string | null, stale: boolean, staleReason: string | undefined, maxAgeMs: number,
+  precision: "minute" | "day", timing: Pick<DataMeta, "cadence" | "sessionClosed">): DataMeta {
   const tooOld = isStale(observedAt, maxAgeMs);
   return {
     sourceId: "twelvedata", source: "Twelve Data", sourceUrl: "https://twelvedata.com",
-    observedAt, observedPrecision: precision, fetchedAt,
+    observedAt, observedPrecision: precision, fetchedAt, ...timing,
     freshness: "Gratistarif, nur private Nutzung; Aktualität je Börse laut Anbieter",
     stale: stale || tooOld,
     staleReason: staleReason ?? (tooOld ? "Der Kurszeitpunkt liegt länger zurück – Börse vermutlich geschlossen." : undefined),
@@ -45,7 +46,9 @@ export async function getStockQuote(symbol: string): Promise<Result<StockQuote>>
     const res = await fetchSource({ sourceId: "twelvedata", url: upstream(`${BASE}/quote?symbol=${encodeURIComponent(s)}&apikey=${encodeURIComponent(k.key)}`), revalidate: 300, parse: parseChecked, ...LIMIT });
     const quote = normalizeQuote(res.value);
     if (!quote || quote.price === null) return fail("twelvedata", "invalid", "Kein Kurs in der Antwort");
-    return ok(quote, meta(res.fetchedAt, quote.observedAt, res.stale, res.staleReason, 4 * 86400000));
+    return ok(quote, meta(res.fetchedAt, quote.observedAt, res.stale, res.staleReason, 4 * 86400000,
+      quote.observedIsBarStart ? "day" : "minute",
+      { cadence: "intraday", sessionClosed: quote.marketOpen === null ? null : !quote.marketOpen }));
   } catch (error) {
     return error instanceof SourceError ? fail("twelvedata", error.reason, error.message) : fail("twelvedata", "unavailable", "Unbekannter Fehler");
   }
@@ -63,7 +66,8 @@ export async function getStockSeries(symbol: string, interval: StockInterval, ou
     const res = await fetchSource({ sourceId: "twelvedata", url: upstream(url), revalidate: interval === "1day" ? 6 * 3600 : 900, parse: parseChecked, ...LIMIT });
     const points = normalizeTimeSeries(res.value);
     const last = points.at(-1);
-    return ok(points, meta(res.fetchedAt, last ? new Date(last[0]).toISOString() : null, res.stale, res.staleReason, 5 * 86400000, interval === "1day" ? "day" : "minute"));
+    return ok(points, meta(res.fetchedAt, last ? new Date(last[0]).toISOString() : null, res.stale, res.staleReason, 5 * 86400000,
+      interval === "1day" ? "day" : "minute", { cadence: interval === "1day" ? "end_of_day" : "intraday" }));
   } catch (error) {
     return error instanceof SourceError ? fail("twelvedata", error.reason, error.message) : fail("twelvedata", "unavailable", "Unbekannter Fehler");
   }

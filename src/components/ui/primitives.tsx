@@ -146,29 +146,6 @@ export function Meter({
   );
 }
 
-/** Vierstufige Datenqualitaet – das wiederkehrende Vertrauenszeichen. */
-export function QualityMarks({ quality, className }: { quality: number; className?: string }) {
-  const filled = Math.max(0, Math.min(4, Math.round((quality / 100) * 4)));
-  const words = ["sehr gering", "gering", "mittel", "gut", "sehr gut"][filled];
-  return (
-    <span
-      className={cn("inline-flex items-center gap-[3px]", className)}
-      title={`Datenqualitaet ${quality} von 100 (${words})`}
-      aria-label={`Datenqualitaet ${quality} von 100`}
-    >
-      {[0, 1, 2, 3].map((i) => (
-        <span
-          key={i}
-          className={cn(
-            "block h-2.5 w-[3px] rounded-[1px]",
-            i < filled ? "bg-accent" : "bg-line-strong opacity-50",
-          )}
-        />
-      ))}
-    </span>
-  );
-}
-
 /* -------------------------------------------------------------------------
    Zustaende
    ---------------------------------------------------------------------- */

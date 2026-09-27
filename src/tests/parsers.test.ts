@@ -160,6 +160,12 @@ describe("Twelve Data", () => {
     assert.equal(q.changeAbs, 2.5);
     assert.ok(Math.abs(q.changePct! - 1.3888) < 0.001);
     assert.equal(q.observedAt, new Date(1790000000000).toISOString());
+    assert.equal(q.observedIsBarStart, true);
+  });
+  test("bevorzugt den Zeitpunkt des letzten Kurses vor dem Beginn der Tageskerze", () => {
+    const q = normalizeQuote({ symbol: "AAPL", close: "182.50", timestamp: 1790000000, last_quote_at: 1790020000, is_market_open: true })!;
+    assert.equal(q.observedAt, new Date(1790020000000).toISOString());
+    assert.equal(q.observedIsBarStart, false);
   });
   test("bringt die Zeitreihe in aufsteigende Reihenfolge", () => {
     const pts = normalizeTimeSeries({ values: [{ datetime: "2026-09-18", close: "182.50" }, { datetime: "2026-09-17", close: "180.00" }, { datetime: "kaputt", close: "1" }] });

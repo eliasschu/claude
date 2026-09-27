@@ -6,7 +6,7 @@ export default function NotFound() {
     <div className="py-10">
       <EmptyState
         title="Dieses Wertpapier oder diese Seite gibt es nicht"
-        hint="Der DEMO-Datensatz enthält eine begrenzte Auswahl an Aktien. Nutzen Sie die Suche oben."
+        hint="Für diese Adresse gibt es keinen Eintrag. Aktien sind nur verfügbar, wenn sie bei der SEC registriert sind. Nutzen Sie die Suche oben."
         action={<Link href="/" className="mt-1 rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-ink">Zur Startseite</Link>}
       />
     </div>

@@ -1,24 +1,24 @@
 import type { UiDataMeta } from "@/lib/data/types";
-import { Chip, QualityMarks } from "@/components/ui/primitives";
+import { FreshnessBadge } from "@/components/common/freshness-badge";
 import { formatDateTime, formatPercent, formatPp } from "@/lib/finance/format";
+import { formatDateOnly } from "@/lib/core/time";
 import { cn } from "@/lib/utils";
 
-const MODE_LABEL: Record<UiDataMeta["mode"], string> = {
-  realtime: "Echtzeit",
-  delayed: "Verzögert",
-  close: "Schlusskurs",
-};
-
 /**
- * Herkunftszeile. Sitzt unter jeder Datenflaeche und beantwortet vier Fragen:
- * Woher, wann, welche Kursart, wie verlaesslich.
+ * Herkunftszeile. Sitzt unter jeder Datenflaeche und beantwortet drei Fragen:
+ * Wie aktuell (Aktualitaetsklasse), Stand wann (Datenzeitpunkt, nicht Abruf), woher.
  */
 export function DataStamp({ meta, className }: { meta: UiDataMeta; className?: string }) {
   return (
     <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint", className)}>
-      <Chip tone="neutral">{MODE_LABEL[meta.mode]}</Chip>
+      <FreshnessBadge input={meta.freshnessInput} initial={meta.freshness} />
       <span>
-        Stand {formatDateTime(meta.asOf, meta.timezone)}
+        Stand{" "}
+        {!meta.asOf
+          ? "nicht belegt"
+          : meta.freshnessInput.observedPrecision === "day"
+            ? formatDateOnly(meta.asOf)
+            : formatDateTime(meta.asOf, meta.timezone)}
       </span>
       <span aria-hidden="true">·</span>
       {meta.sourceUrl ? (
@@ -28,7 +28,6 @@ export function DataStamp({ meta, className }: { meta: UiDataMeta; className?: s
       ) : (
         <span>{meta.source}</span>
       )}
-      <QualityMarks quality={meta.quality} className="ml-auto" />
     </div>
   );
 }

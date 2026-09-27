@@ -7,6 +7,8 @@
  * Ein frischer Abruf macht einen alten Kurs nicht aktuell.
  */
 
+import type { Cadence } from "./freshness.ts";
+
 export type SourceId =
   | "coingecko" | "sec" | "ecb" | "ecb-press" | "fed-press" | "sec-press"
   | "treasury" | "eia" | "twelvedata" | "calendar";
@@ -29,6 +31,10 @@ export interface DataMeta {
   attribution?: string;
   /** Version der angewandten Berechnung, falls abgeleitet. */
   calcVersion?: string;
+  /** Takt der Daten, falls er vom Standard der Quelle abweicht (siehe core/freshness.ts). */
+  cadence?: Cadence;
+  /** Nur bei Boersenkursen: meldet die Quelle den Handel als geschlossen? null = unbekannt. */
+  sessionClosed?: boolean | null;
 }
 
 export type FailureReason = "not_configured" | "unavailable" | "rate_limited" | "not_found" | "invalid";

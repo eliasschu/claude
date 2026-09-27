@@ -122,7 +122,7 @@ export async function getStockOverview(ticker: string, options: { withPrices?: b
       ...secMeta(company.meta.fetchedAt, latest?.end ?? null, false, undefined,
         latest?.accession ? filingUrls(listing.data.cik, latest.accession, "").index : undefined),
       source: "SEC EDGAR – Jahresabschlüsse", freshness: "laut Einreichung des Jahresberichts",
-      calcVersion: model.calcVersion,
+      cadence: "annual", calcVersion: model.calcVersion,
     };
     return ok({
       listing: listing.data, company: company.data, companyMeta: company.meta,

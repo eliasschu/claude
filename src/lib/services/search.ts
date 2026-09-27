@@ -18,7 +18,7 @@ export async function search(query: string, limit = 12): Promise<{ hits: SearchH
   for (const m of MARKETS) {
     const text = normalizeQuery(`${m.name} ${m.fullName}`);
     if (text.includes(q) || words.some((w) => w.length > 3 && text.includes(w))) {
-      hits.push({ rank: 1, hit: { kind: "market", key: m.slug, label: m.fullName, sublabel: m.source ? "Markt" : "Markt · keine Quelle verbunden", href: m.coinId ? `/krypto/${m.coinId}` : `/maerkte/${m.slug}` } });
+      hits.push({ rank: 1, hit: { kind: "market", key: m.slug, label: m.fullName, sublabel: m.source ? "Markt" : "Markt · keine Quelle verbunden", href: m.coinId ? `/krypto/${m.coinId}` : m.source ? `/#markt-${m.slug}` : "/datenquellen" } });
     }
   }
 
