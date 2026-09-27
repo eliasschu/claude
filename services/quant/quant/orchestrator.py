@@ -36,9 +36,11 @@ from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, Prem
 from .providers.registry import Providers
 from .quality import validate_bars
 from .regime import crypto_regime, equity_regime
-from .repo import load_bars, observations_as_of, record_observation, upsert_bars
+from .repo import load_bars, load_flow, observations_as_of, record_observation, upsert_bars
+from .ws.flow_features import add_flow_features
 from .risk import RiskEngine, final_decision
 from .shadow import record_shadow
+from .signal_state import SignalGate
 from .strategies import StrategyRegistry, run_signal_engine
 from .universe import ETFS, crypto_instrument, equity_instrument, parse_pair
 
@@ -110,7 +112,7 @@ class BotOrchestrator:
                  crypto_symbols: tuple[str, ...], equity_symbols: tuple[str, ...], registry: StrategyRegistry | None = None,
                  risk: RiskEngine | None = None, events: BotEventLog | None = None, clock: Clock = utc_now,
                  kill_limits: KillSwitchLimits = KillSwitchLimits(), benchmark_equity: str = "SPY", benchmark_crypto: str = "BTCUSDT",
-                 shadow: bool = True):
+                 shadow: bool = True, gate: SignalGate | None = None):
         if mode not in ("research", "paper"):
             raise ValueError("Nur research oder paper - Live-Handel ist gesperrt")
         self.conn = conn
@@ -131,6 +133,8 @@ class BotOrchestrator:
         self.starting_cash = starting_cash
         self.metrics: Metrics = METRICS
         self.shadow = shadow
+        self.gate = gate or SignalGate()
+        self.gate.warm_start(conn, clock())
         self._rep_lock = threading.Lock()
         self._lkg: dict[tuple[str, str], object] = {}
         conn.commit()
@@ -354,8 +358,13 @@ class BotOrchestrator:
                    for r in observations_as_of(self.conn, "funding_rate", perp_id, as_of - timedelta(days=30), as_of)]
         oi = [OpenInterestPoint(r["event_time"], r["value"], (r["value_json"] or {}).get("notional"))
               for r in observations_as_of(self.conn, "open_interest", perp_id, as_of - timedelta(hours=3), as_of)]
-        return crypto_features(CryptoInputs(spot_id, spot, perp, live.quote, live.quote_at, live.book, live.premium,
-                                            funding, oi, "+".join(sorted(live.sources | {primary})), as_of))
+        fs = crypto_features(CryptoInputs(spot_id, spot, perp, live.quote, live.quote_at, live.book, live.premium,
+                                          funding, oi, "+".join(sorted(live.sources | {primary})), as_of))
+        # Mikrostruktur aus dem ws-ingestor (Sekundenzeilen, Point-in-Time). Ohne WebSocket: ehrlich "unavailable".
+        if "*" not in fs.unavailable:
+            flow, book, liqs, alive = load_flow(self.conn, spot_id, perp_id, as_of)
+            add_flow_features(fs, flow=flow, book=book, liqs=liqs, liq_feed_alive_at=alive, source_ids=(primary,), as_of=as_of)
+        return fs
 
     def _crypto_cycle(self, rep: CycleReport) -> None:
         self.events.emit("cycle_started", f"Krypto-Zyklus gestartet ({len(self.crypto_symbols)} Paare)", cycle_id=rep.cycle_id)
@@ -535,6 +544,14 @@ class BotOrchestrator:
     def _decide(self, rep: CycleReport, ev: StrategyEvaluation, fs: FeatureSet, asset_class: str, regime: RegimeState,
                 snapshot_id: uuid.UUID, *, price_basis: str, marks: dict[str, float], instrument_id: str) -> None:
         now = self.clock()
+        # Signal-Ebene (gemeinsamer Kern): Bestaetigung, Hysterese, Cooldown
+        gated = self.gate.apply(ev, now)
+        if gated.suppress:
+            rep.bump("gate_hysteresis")
+            return
+        if gated.evaluation is not ev:
+            rep.bump(f"gate_{gated.note}")
+        ev = gated.evaluation
         if ev.decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE) and self._holding(instrument_id, ev.strategy_id):
             # Setup derselben Strategie besteht fort, Position/Order existiert bereits: kein neues Signal, keine Schein-Ablehnung.
             # Kandidaten ANDERER Strategien laufen weiter durch die Risk Engine (dort: "bereits offene Position").

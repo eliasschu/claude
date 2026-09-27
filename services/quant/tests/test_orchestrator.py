@@ -41,33 +41,48 @@ def test_crypto_cycle_end_to_end(db):
     n = db.execute("SELECT count(*) AS n FROM bars WHERE timeframe='1m'").fetchone()["n"]
     assert n > 2 * 7 * 1440
     assert db.execute("SELECT count(*) AS n FROM bars WHERE ts > %s", (START,)).fetchone()["n"] == 0
-    signals = db.execute("SELECT decision, strategy_id, mode FROM signals").fetchall()
+    signals = db.execute("SELECT decision, strategy_id, mode, risk_assessment FROM signals").fetchall()
     assert len(signals) == 4  # 2 Paare x 2 Krypto-Strategien, erster Stand wird immer festgehalten
     assert {s["mode"] for s in signals} == {"paper"}
+    # Signal Gate: ein Intraday-Kandidat braucht zwei Auswertungen in Folge
+    assert all(s["decision"] != "LONG_CANDIDATE" for s in signals)
+    assert any("Bestätigung ausstehend (1/2" in " ".join(s["risk_assessment"]["reasons"]) for s in signals)
     assert db.execute("SELECT count(*) AS n FROM regime_snapshots").fetchone()["n"] == 1
     events = [e["event_type"] for e in db.execute("SELECT event_type FROM bot_events ORDER BY event_id").fetchall()]
     assert events[0] == "cycle_started" and events[-1] == "cycle_finished" and "regime" in events
 
-    # Zweiter Zyklus eine Minute spaeter: gleiche Entscheidungen werden nicht erneut protokolliert
+    # Zweite Auswertung: bestaetigt -> Kandidat
     clock.t = START + timedelta(minutes=1)
-    before = len(signals)
+    bot.run_crypto_cycle()
+    assert db.execute("SELECT count(*) AS n FROM signals WHERE decision='LONG_CANDIDATE'").fetchone()["n"] >= 1
+    # Dritte Auswertung: unveraenderter Stand -> nichts Neues (Hysterese + Deduplizierung)
+    before = db.execute("SELECT count(*) AS n FROM signals").fetchone()["n"]
+    clock.t = START + timedelta(minutes=2)
     bot.run_crypto_cycle()
     assert db.execute("SELECT count(*) AS n FROM signals").fetchone()["n"] == before
     ok, problems = SignalAuditService(db).verify_chain()
     assert ok, problems
 
 
+def confirm(bot, clock):
+    """Zwei Auswertungen in Folge (Signal Gate) - danach steht der Kandidat."""
+    clock.t = START
+    bot.run_crypto_cycle()
+    clock.t = START + timedelta(minutes=1)
+    bot.run_crypto_cycle()
+
+
 def test_candidate_becomes_paper_trade_and_exits_realistically(db):
     clock = Clock(START)
     bot, _ = make_bot(db, clock)
-    bot.run_crypto_cycle()
+    confirm(bot, clock)
     cands = db.execute("SELECT signal_id, decision, risk_assessment FROM signals WHERE decision='LONG_CANDIDATE'").fetchall()
     orders = db.execute("SELECT * FROM paper_orders").fetchall()
     assert len(orders) == len(cands) and len(cands) >= 1, [
         (r["decision"], r["risk_assessment"]["summary"]) for r in db.execute("SELECT decision, risk_assessment FROM signals").fetchall()]
     assert all(o["status"] == "pending" for o in orders)  # Handelsverzoegerung: noch kein Fill im selben Moment
 
-    clock.t = START + timedelta(minutes=1)
+    clock.t = START + timedelta(minutes=2)
     bot.run_crypto_cycle()
     fills = db.execute("SELECT f.*, o.side FROM paper_fills f JOIN paper_orders o USING (order_id)").fetchall()
     assert fills and all(f["slippage_bps"] > 0 and f["fee"] > 0 for f in fills)  # kein perfekter Mid-Fill
@@ -75,9 +90,9 @@ def test_candidate_becomes_paper_trade_and_exits_realistically(db):
     assert len(pos) == len(fills)
 
     # Kurseinbruch: Stop muss greifen, mit Verlust nach Kosten
-    crash_at = START + timedelta(minutes=2)
+    crash_at = START + timedelta(minutes=3)
     bot_crash, _ = make_bot(db, clock, crypto_fn=lambda s, t: uptrend(s, t) * (0.9 if t >= crash_at else 1.0))
-    clock.t = START + timedelta(minutes=5)
+    clock.t = START + timedelta(minutes=6)
     bot_crash.run_crypto_cycle()
     closed = db.execute("SELECT exit_reason, realized_pnl FROM paper_positions WHERE closed_at IS NOT NULL").fetchall()
     assert closed and all(c["exit_reason"] == "stop" and c["realized_pnl"] < 0 for c in closed)
@@ -115,8 +130,7 @@ def test_equity_cycle_and_outcome_resolution(db):
     assert snap["values"]["close"]["freshness"] == "end_of_day"
 
     # Ergebnisaufloesung: Krypto-Signal nach >1 h
-    clock.t = START
-    bot.run_crypto_cycle()
+    confirm(bot, clock)
     clock.t = START + timedelta(hours=1, minutes=5)
     bot.run_crypto_cycle()
     n = resolve_outcomes(db, clock(), {"crypto": None})

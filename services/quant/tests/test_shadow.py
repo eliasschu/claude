@@ -4,7 +4,7 @@ import pytest
 
 from quant.config import load_settings
 from quant.shadow import resolve_shadows
-from tests.test_orchestrator import START, make_bot, uptrend
+from tests.test_orchestrator import START, confirm, make_bot, uptrend
 from tests.fakes import Clock
 
 
@@ -20,7 +20,7 @@ def test_live_trading_is_hard_blocked(monkeypatch):
 def test_every_candidate_gets_planned_order_including_rejected(db):
     clock = Clock(START)
     bot, _ = make_bot(db, clock)
-    bot.run_crypto_cycle()
+    confirm(bot, clock)
     rows = db.execute("""SELECT s.decision, x.* FROM shadow_executions x JOIN signals s USING (signal_id)""").fetchall()
     decisions = {r["decision"] for r in rows}
     assert "LONG_CANDIDATE" in decisions and "REJECTED_BY_RISK" in decisions  # auch die abgelehnte Idee
@@ -38,9 +38,9 @@ def test_every_candidate_gets_planned_order_including_rejected(db):
 def test_shadow_resolution_uses_costs_and_only_known_bars(db):
     clock = Clock(START)
     bot, _ = make_bot(db, clock)
-    bot.run_crypto_cycle()
+    confirm(bot, clock)
     db.commit()
-    assert resolve_shadows(db, START) == 0  # noch keine Kerze nach dem Signal bekannt
+    assert resolve_shadows(db, clock.t) == 0  # noch keine Kerze nach dem Signal bekannt
     crash_at = START + timedelta(minutes=3)
     bot2, _ = make_bot(db, clock, crypto_fn=lambda s, t: uptrend(s, t) * (0.9 if t >= crash_at else 1.0))
     clock.t = START + timedelta(minutes=6)

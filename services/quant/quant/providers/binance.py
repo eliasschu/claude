@@ -116,6 +116,14 @@ class BinanceProvider:
         raw, fetched = self._json(SPOT, "/api/v3/depth", {"symbol": symbol, "limit": depth})
         return Sourced(parse_depth(raw, fetched), self.source_id, fetched, fetched, "intraday")
 
+    def spot_depth_snapshot(self, symbol: str, limit: int = 1000) -> Sourced[tuple[int, OrderBook]]:
+        """REST-Snapshot MIT lastUpdateId - Grundlage fuer die Synchronisation des lokalen Orderbuchs."""
+        raw, fetched = self._json(SPOT, "/api/v3/depth", {"symbol": symbol, "limit": limit})
+        try:
+            return Sourced((int(raw["lastUpdateId"]), parse_depth(raw, fetched)), self.source_id, fetched, fetched, "intraday")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderError(self.source_id, "invalid", f"Snapshot unbrauchbar: {exc}") from exc
+
     def premium_index(self, symbol: str) -> Sourced[PremiumIndex]:
         raw, fetched = self._json(FUTURES, "/fapi/v1/premiumIndex", {"symbol": symbol})
         p = parse_premium_index(raw)

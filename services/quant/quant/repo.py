@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable, Sequence
 
 import psycopg
@@ -136,3 +136,55 @@ def observations_as_of(conn: psycopg.Connection, series_key: str, instrument_id:
            ORDER BY event_time, revision DESC""",
         (series_key, instrument_id, since, as_of),
     ).fetchall()
+
+
+# --------------------------------------------------------------------------- WebSocket-Sekundenzeilen
+def store_flow(conn: psycopg.Connection, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO trade_flow_1s (instrument_id, source_id, ts, buy_qty, sell_qty, buy_notional, sell_notional, trades,
+                                          last_price, max_trade_notional, received_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+            [(instrument_id, source_id, r["ts"], r["buy_qty"], r["sell_qty"], r["buy_notional"], r["sell_notional"], r["trades"],
+              r["last_price"], r["max_trade_notional"], received_at) for r in rows])
+    return len(rows)
+
+
+def store_book(conn: psycopg.Connection, instrument_id: str, source_id: str, rows: Sequence[dict], *, received_at: datetime) -> int:
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO orderbook_1s (instrument_id, source_id, ts, best_bid, best_ask, spread_bps, depth_bid_10bps, depth_ask_10bps,
+                                         imbalance_10bps, last_update_id, exchange_time, received_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+            [(instrument_id, source_id, r["ts"], r["best_bid"], r["best_ask"], r["spread_bps"], r["depth_bid_10bps"], r["depth_ask_10bps"],
+              r["imbalance_10bps"], r["last_update_id"], r["exchange_time"], received_at) for r in rows])
+    return len(rows)
+
+
+def store_liquidations(conn: psycopg.Connection, instrument_id: str, source_id: str, liqs: Sequence) -> int:
+    if not liqs:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO liquidations (instrument_id, source_id, exchange_time, received_at, side, price, quantity, notional)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+            [(instrument_id, source_id, l.exchange_time, l.received_at, l.side, l.price, l.quantity, l.notional) for l in liqs])
+    return len(liqs)
+
+
+def load_flow(conn: psycopg.Connection, spot_id: str, perp_id: str, as_of: datetime, window: timedelta = timedelta(minutes=5)):
+    """Sekundenzeilen, die der Bot zum Zeitpunkt as_of kannte (received_at <= as_of)."""
+    since = as_of - window
+    flow = conn.execute("""SELECT * FROM trade_flow_1s WHERE instrument_id=%s AND ts >= %s AND received_at <= %s ORDER BY ts""",
+                        (spot_id, since, as_of)).fetchall()
+    book = conn.execute("""SELECT * FROM orderbook_1s WHERE instrument_id=%s AND ts >= %s AND received_at <= %s ORDER BY ts""",
+                        (spot_id, since, as_of)).fetchall()
+    liqs = conn.execute("""SELECT * FROM liquidations WHERE instrument_id=%s AND exchange_time >= %s AND received_at <= %s""",
+                        (perp_id, since, as_of)).fetchall()
+    alive = conn.execute("""SELECT max(received_at) AS t FROM ws_stream_status WHERE stream LIKE %s AND state='live'
+                            AND received_at <= %s""", (f"%:liquidations:{perp_id}", as_of)).fetchone()["t"]
+    return flow, book, liqs, alive
