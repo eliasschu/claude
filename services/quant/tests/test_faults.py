@@ -138,3 +138,24 @@ def test_parallel_fetch_keeps_cycle_short_when_provider_is_slow(db):
     end = max(t1 for _, t1 in fetch_time.values())
     # seriell: 4 x 0,4 s = 1,6 s; parallel: gut 0,4 s
     assert end - start < 1.0, end - start
+
+
+def test_fred_timeout_does_not_block_cftc(db, monkeypatch):
+    """FRED haengt: COT wird trotzdem abgeglichen, der Scheduler laeuft weiter."""
+    from datetime import datetime, timezone
+    from quant import scheduler
+    from quant.providers.cftc import CftcProvider
+    from quant.providers.fred import FredProvider
+
+    def fred_timeout(self, *a, **k):
+        raise ProviderError("fred", "unavailable", "Zeitlimit")
+
+    def cot(self, rtype, codes, since):
+        from quant.providers.base import Sourced
+        return Sourced([], "cftc", datetime.now(timezone.utc), None, "weekly")
+
+    monkeypatch.setattr(FredProvider, "releases", fred_timeout)
+    monkeypatch.setattr(CftcProvider, "reports", cot)
+    settings = type("S", (), {"fred_api_key": "k"})()
+    totals = scheduler.run_macro_and_cot(db, settings, datetime(2026, 9, 22, tzinfo=timezone.utc))
+    assert totals["errors"] == len(scheduler.MACRO_SERIES) and totals["cot_rows"] == 0

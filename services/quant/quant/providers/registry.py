@@ -28,6 +28,14 @@ class Providers:
     crypto_fallbacks: list = field(default_factory=list)
 
 
+def _fred():
+    import os
+
+    from .fred import FredProvider
+    key = os.environ.get("FRED_API_KEY")
+    return FredProvider(key) if key else NotConfiguredProvider("fred", "FRED/ALFRED (FRED_API_KEY fehlt)")
+
+
 def default_providers() -> Providers:
     return Providers(
         market=StooqProvider(),
@@ -38,7 +46,7 @@ def default_providers() -> Providers:
         insider=NotConfiguredProvider("sec", "SEC Form 4 im Bot"),
         institutional=NotConfiguredProvider("sec", "SEC 13F im Bot"),
         options=NotConfiguredProvider("options", "Optionsdaten (OPRA, lizenzpflichtig)"),
-        macro=NotConfiguredProvider("fred", "FRED/ALFRED"),
+        macro=_fred(),
         onchain=NotConfiguredProvider("defillama", "On-Chain-Daten"),
         news=NotConfiguredProvider("news", "Nachrichtenfeed"),
         crypto_fallbacks=[CoinbaseProvider()],
