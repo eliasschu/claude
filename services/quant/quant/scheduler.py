@@ -32,6 +32,42 @@ def equity_due(conn, now: datetime) -> bool:
     return row is None
 
 
+def run_sec(conn, settings, now: datetime) -> dict:
+    """Form 4 + 13D/G fuer das Aktienuniversum, 13F fuer die Manager-Liste. Fehler je Firma isoliert."""
+    from .providers.base import ProviderError
+    from .sec.client import SecClient
+    from .sec.ingest import SecIngestor
+
+    totals = {"issuers": 0, "managers": 0, "errors": 0}
+    try:
+        client = SecClient(settings.sec_user_agent)
+        tickers = client.ticker_map()
+    except ProviderError as exc:
+        log.warning("SEC nicht verfuegbar", extra={"event": "sec_unavailable", "error_type": exc.reason})
+        return totals
+    ing = SecIngestor(conn, client, lambda: datetime.now(timezone.utc))
+    since = (now - timedelta(days=120)).date()
+    for t in settings.equity_symbols:
+        cik = tickers.get(t.upper())
+        if not cik:
+            continue  # ETFs haben keine Form-4-Meldungen
+        try:
+            ing.ingest_issuer(cik, since)
+            totals["issuers"] += 1
+        except ProviderError:
+            totals["errors"] += 1
+            conn.rollback()
+    for cik in settings.sec_13f_managers:
+        try:
+            ing.ingest_manager(cik, (now - timedelta(days=400)).date())
+            totals["managers"] += 1
+        except ProviderError:
+            totals["errors"] += 1
+            conn.rollback()
+    log.info("SEC-Abgleich", extra={"event": "sec_ingest", **totals})
+    return totals
+
+
 def main() -> None:
     import psycopg
 
@@ -43,6 +79,7 @@ def main() -> None:
     bot = None
     attempt = 0
     last_outcomes = datetime.min.replace(tzinfo=timezone.utc)
+    last_sec = datetime.min.replace(tzinfo=timezone.utc)
     started_at = datetime.now(timezone.utc)
     log.info("scheduler gestartet", extra={"event": "service_started"})
     while not stop.is_set():
@@ -64,6 +101,9 @@ def main() -> None:
                 rep = bot.run_equity_cycle()
                 if rep is not None:
                     log.info("Aktien-Zyklus beendet", extra={"event": "cycle_finished", "cycle_id": str(rep.cycle_id), "counts": rep.counts})
+            if now - last_sec >= timedelta(minutes=30):
+                run_sec(conn, _settings, now)
+                last_sec = now
             if now - last_outcomes >= timedelta(minutes=5):
                 bench = {"equity": resolve(conn, "ticker", "SPY", "US"), "crypto": resolve(conn, "exchange_symbol", "BTCUSDT", "binance")}
                 n = resolve_outcomes(conn, now, bench)

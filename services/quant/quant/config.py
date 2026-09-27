@@ -29,6 +29,7 @@ class Settings:
     # Shadow: jede Handelsidee (auch abgelehnte) mit geplanter Order und hypothetischer Ausfuehrung protokollieren
     shadow_execution: bool = True
     fred_api_key: str | None = None
+    sec_13f_managers: tuple[str, ...] = field(default_factory=tuple)
 
 
 ALLOWED_MODES = ("research", "paper")
@@ -65,4 +66,6 @@ def load_settings() -> Settings:
         live_trading=False,
         shadow_execution=_flag("SHADOW_EXECUTION", True),
         fred_api_key=_env("FRED_API_KEY"),
+        # Standard: Berkshire, Bridgewater, Renaissance, Pershing Square, Appaloosa (CIKs wie in src/config/whales.ts)
+        sec_13f_managers=tuple((_env("SEC_13F_MANAGERS", "1067983,1350694,1037389,1336528,1006438") or "").split(",")),
     )
