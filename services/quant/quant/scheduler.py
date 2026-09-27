@@ -12,6 +12,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .outcomes import resolve_outcomes
+from .shadow import resolve_shadows
 from .repo import resolve
 from .runtime import build, stop_event
 
@@ -63,8 +64,9 @@ def main() -> None:
             if now - last_outcomes >= timedelta(minutes=5):
                 bench = {"equity": resolve(conn, "ticker", "SPY", "US"), "crypto": resolve(conn, "exchange_symbol", "BTCUSDT", "binance")}
                 n = resolve_outcomes(conn, now, bench)
+                n_shadow = resolve_shadows(conn, now)
                 conn.commit()
-                log.info("Ergebnisse aufgeloest", extra={"event": "outcomes_resolved", "count": n})
+                log.info("Ergebnisse aufgeloest", extra={"event": "outcomes_resolved", "count": n, "shadow_count": n_shadow})
                 last_outcomes = now
         except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
             log.error("Datenbankverbindung verloren", extra={"event": "db_connection_lost", "error_type": type(exc).__name__})

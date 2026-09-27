@@ -201,6 +201,9 @@ class RiskAssessment:
     position_notional: float | None
     risk_amount: float | None
     version: str
+    # Geplante Groesse auch bei Ablehnung - fuer Shadow-Auswertung ("was haette die Ablehnung gekostet?")
+    proposed_quantity: float | None = None
+    proposed_notional: float | None = None
 
     @property
     def failed(self) -> list[RiskCheck]:
@@ -210,6 +213,7 @@ class RiskAssessment:
         return {
             "approved": self.approved, "risk_reward": self.risk_reward, "position_quantity": self.position_quantity,
             "position_notional": self.position_notional, "risk_amount": self.risk_amount, "version": self.version,
+            "proposed_quantity": self.proposed_quantity, "proposed_notional": self.proposed_notional,
             "checks": [asdict(c) for c in self.checks],
         }
 

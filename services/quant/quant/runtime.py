@@ -27,7 +27,8 @@ def build(settings: Settings | None = None) -> tuple[Settings, BotOrchestrator]:
 
         redis_client = redis.Redis.from_url(s.redis_url, socket_timeout=2)
     bot = BotOrchestrator(conn, default_providers(), mode=s.mode, account_id=s.paper_account_id, starting_cash=s.paper_starting_cash,
-                          crypto_symbols=s.crypto_symbols, equity_symbols=s.equity_symbols, events=BotEventLog(conn, redis_client))
+                          crypto_symbols=s.crypto_symbols, equity_symbols=s.equity_symbols, events=BotEventLog(conn, redis_client),
+                          shadow=s.shadow_execution)
     return s, bot
 
 

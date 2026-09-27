@@ -38,6 +38,7 @@ from .quality import validate_bars
 from .regime import crypto_regime, equity_regime
 from .repo import load_bars, observations_as_of, record_observation, upsert_bars
 from .risk import RiskEngine, final_decision
+from .shadow import record_shadow
 from .strategies import StrategyRegistry, run_signal_engine
 from .universe import ETFS, crypto_instrument, equity_instrument, parse_pair
 
@@ -108,7 +109,8 @@ class BotOrchestrator:
     def __init__(self, conn: psycopg.Connection, providers: Providers, *, mode: str, account_id: str, starting_cash: float,
                  crypto_symbols: tuple[str, ...], equity_symbols: tuple[str, ...], registry: StrategyRegistry | None = None,
                  risk: RiskEngine | None = None, events: BotEventLog | None = None, clock: Clock = utc_now,
-                 kill_limits: KillSwitchLimits = KillSwitchLimits(), benchmark_equity: str = "SPY", benchmark_crypto: str = "BTCUSDT"):
+                 kill_limits: KillSwitchLimits = KillSwitchLimits(), benchmark_equity: str = "SPY", benchmark_crypto: str = "BTCUSDT",
+                 shadow: bool = True):
         if mode not in ("research", "paper"):
             raise ValueError("Nur research oder paper - Live-Handel ist gesperrt")
         self.conn = conn
@@ -128,6 +130,7 @@ class BotOrchestrator:
         self.portfolio = PaperPortfolio(conn, account_id, "USD", starting_cash)
         self.starting_cash = starting_cash
         self.metrics: Metrics = METRICS
+        self.shadow = shadow
         self._rep_lock = threading.Lock()
         self._lkg: dict[tuple[str, str], object] = {}
         conn.commit()
@@ -538,6 +541,9 @@ class BotOrchestrator:
         )
         signal_id = self.audit.record(ev, decision, risk, ctx)
         rep.bump("signals_recorded")
+        self.metrics.inc("signals_generated_total", decision=decision.value, strategy=ev.strategy_id)
+        if decision == Decision.REJECTED_BY_RISK:
+            self.metrics.inc("signals_rejected_total", strategy=ev.strategy_id)
         text = {
             Decision.LONG_CANDIDATE: f"Long-Kandidat ({ev.strategy_id}), Signalstärke {ev.strength:.0f}",
             Decision.SHORT_CANDIDATE: f"Short-Kandidat ({ev.strategy_id}), Signalstärke {ev.strength:.0f}",
@@ -548,6 +554,11 @@ class BotOrchestrator:
         self.events.emit("signal", text, cycle_id=rep.cycle_id, instrument_id=instrument_id, signal_id=signal_id,
                          severity="notice" if decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE) else "info",
                          payload={"decision": decision.value, "strength": ev.strength, "strategy_id": ev.strategy_id})
+        if self.shadow and ev.decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE):
+            # Shadow: geplante Order + spaetere hypothetische Ausfuehrung fuer JEDE Handelsidee, auch abgelehnte
+            if record_shadow(self.conn, signal_id=signal_id, ev=ev, risk=risk, now=now, asset_group=asset_class, snapshot_id=snapshot_id):
+                rep.bump("shadow_recorded")
+                self.metrics.inc("orders_simulated_total", kind="shadow", strategy=ev.strategy_id)
         if self.mode == "paper" and risk.approved and decision in (Decision.LONG_CANDIDATE, Decision.SHORT_CANDIDATE) and ev.exit_plan:
             cost = COSTS["crypto" if asset_class == "crypto" else "equity"]
             try:

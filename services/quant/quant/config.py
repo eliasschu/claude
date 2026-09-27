@@ -23,9 +23,21 @@ class Settings:
     sec_user_agent: str | None
     crypto_symbols: tuple[str, ...] = field(default_factory=tuple)
     equity_symbols: tuple[str, ...] = field(default_factory=tuple)
+    # Safe Production Test Mode: echte Marktdaten, echte Zyklen, KEINE echten Orders
+    live_data: bool = True
+    live_trading: bool = False
+    # Shadow: jede Handelsidee (auch abgelehnte) mit geplanter Order und hypothetischer Ausfuehrung protokollieren
+    shadow_execution: bool = True
+    fred_api_key: str | None = None
 
 
 ALLOWED_MODES = ("research", "paper")
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = _env(name)
+    return default if raw is None else raw.lower() in _TRUE
 
 
 def load_settings() -> Settings:
@@ -33,6 +45,11 @@ def load_settings() -> Settings:
     if mode not in ALLOWED_MODES:
         raise RuntimeError(
             f"BOT_MODE={mode!r} ist nicht erlaubt. Bis zur rechtlichen Pruefung laeuft das System nur als research oder paper."
+        )
+    if _flag("LIVE_TRADING", False):
+        raise RuntimeError(
+            "LIVE_TRADING=true ist gesperrt. Es gibt keinen Codepfad zu echten Orders; der Betrieb bleibt "
+            "Research/Paper/Shadow bis zur rechtlichen Pruefung."
         )
     return Settings(
         database_url=_env("DATABASE_URL", "postgresql://quant:quant@localhost:5432/quant"),
@@ -44,4 +61,8 @@ def load_settings() -> Settings:
         sec_user_agent=_env("SEC_EDGAR_USER_AGENT"),
         crypto_symbols=tuple((_env("CRYPTO_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT") or "").split(",")),
         equity_symbols=tuple((_env("EQUITY_SYMBOLS", "SPY,QQQ,AAPL,MSFT,NVDA,AMZN,META,GOOGL,TSLA,AMD") or "").split(",")),
+        live_data=_flag("LIVE_DATA", True),
+        live_trading=False,
+        shadow_execution=_flag("SHADOW_EXECUTION", True),
+        fred_api_key=_env("FRED_API_KEY"),
     )

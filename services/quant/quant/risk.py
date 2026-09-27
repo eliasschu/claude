@@ -129,7 +129,8 @@ class RiskEngine:
 
         approved = all(c.passed for c in checks)
         return RiskAssessment(approved, tuple(checks), round(rr, 4) if rr else None, qty if approved else None,
-                              notional if approved else None, risk_amount if approved else None, RISK_VERSION)
+                              notional if approved else None, risk_amount if approved else None, RISK_VERSION,
+                              proposed_quantity=qty, proposed_notional=notional)
 
 
 def final_decision(ev: StrategyEvaluation, risk: RiskAssessment) -> Decision:
