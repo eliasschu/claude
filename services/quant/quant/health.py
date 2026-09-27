@@ -1,13 +1,23 @@
-"""ProviderHealthService (§83) und Kill Switch (§45)."""
+"""
+ProviderHealthService (§83), Kill Switch (§45) und System-Health.
+
+System-Health kennt drei Zustaende: HEALTHY, DEGRADED, UNHEALTHY.
+Ein einzelner Datenanbieter- oder WebSocket-Ausfall macht das System nur
+DEGRADED, solange eine Ersatzquelle liefert bzw. Kerndienste laufen.
+UNHEALTHY ist reserviert fuer: Datenbank weg, Worker/Scheduler tot, oder
+KEINE Marktdatenquelle mehr erreichbar.
+"""
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import psycopg
 
 MAX_CLOCK_SKEW = timedelta(seconds=5)
+ORDER = {"HEALTHY": 0, "DEGRADED": 1, "UNHEALTHY": 2}
 
 
 class ProviderHealthService:
@@ -55,3 +65,106 @@ def kill_switch_reason(*, equity: float, starting_cash: float, day_start_equity:
     if recent_slippage_bps and max(recent_slippage_bps) > limits.max_abnormal_slippage_bps:
         return f"Ungewoehnliche Slippage ({max(recent_slippage_bps):.0f} bps)"
     return None
+
+
+# ------------------------------------------------------------------------------------ System-Health
+@dataclass(frozen=True)
+class HealthThresholds:
+    worker_max_silence: timedelta = timedelta(minutes=3)
+    scheduler_max_silence: timedelta = timedelta(minutes=3)
+    ws_max_silence: timedelta = timedelta(minutes=2)
+    crypto_cycle_max_age: timedelta = timedelta(minutes=5)
+    provider_window: timedelta = timedelta(minutes=15)
+
+
+def _component(name: str, state: str, reason: str, **extra) -> dict:
+    return {"component": name, "state": state, "reason": reason, **extra}
+
+
+def system_health(conn: psycopg.Connection, now: datetime, t: HealthThresholds = HealthThresholds(),
+                  expect_ws: bool = False) -> dict:
+    comps: list[dict] = []
+    # DATABASE
+    started = time.monotonic()
+    try:
+        conn.execute("SELECT 1")
+        latency = (time.monotonic() - started) * 1000
+        comps.append(_component("database", "HEALTHY" if latency < 500 else "DEGRADED", f"Antwort in {latency:.0f} ms", latency_ms=latency))
+    except psycopg.Error as exc:
+        return {"state": "UNHEALTHY", "checked_at": now.isoformat(),
+                "components": [_component("database", "UNHEALTHY", f"nicht erreichbar ({type(exc).__name__})")]}
+
+    beats = {r["service"]: r for r in conn.execute(
+        "SELECT DISTINCT ON (service) * FROM service_heartbeats ORDER BY service, last_beat DESC").fetchall()}
+
+    def service(name: str, silence: timedelta, required: bool = True) -> None:
+        b = beats.get(name)
+        if b is None:
+            comps.append(_component(name, "UNHEALTHY" if required else "DEGRADED", "kein Heartbeat"))
+            return
+        age = now - b["last_beat"]
+        if age > silence:
+            comps.append(_component(name, "UNHEALTHY" if required else "DEGRADED", f"letzter Heartbeat vor {age.total_seconds():.0f} s",
+                                    last_beat=b["last_beat"].isoformat()))
+        else:
+            comps.append(_component(name, b["status"], b["details"].get("reason", "laeuft"), last_beat=b["last_beat"].isoformat()))
+
+    service("worker", t.worker_max_silence)
+    service("scheduler", t.scheduler_max_silence)
+
+    # BOT CORE: letzter Krypto-Zyklus
+    # Aktualitaet am juengsten (auch laufenden) Zyklus, Zustand am juengsten ABGESCHLOSSENEN
+    newest = conn.execute("SELECT started_at FROM bot_cycles WHERE scope='crypto' ORDER BY started_at DESC LIMIT 1").fetchone()
+    cyc = conn.execute("""SELECT status, started_at, error FROM bot_cycles WHERE scope='crypto' AND status <> 'running'
+                          ORDER BY started_at DESC LIMIT 5""").fetchall()
+    if not newest or not cyc:
+        comps.append(_component("bot_core", "UNHEALTHY", "noch kein abgeschlossener Zyklus"))
+    else:
+        last = {**cyc[0], "started_at": newest["started_at"]}
+        failed_in_row = next((i for i, c in enumerate(cyc) if c["status"] != "failed"), len(cyc))
+        if now - last["started_at"] > t.crypto_cycle_max_age:
+            comps.append(_component("bot_core", "UNHEALTHY", f"letzter Zyklus vor {(now - last['started_at']).total_seconds():.0f} s"))
+        elif failed_in_row >= 3:
+            comps.append(_component("bot_core", "UNHEALTHY", f"{failed_in_row} Zyklen in Folge fehlgeschlagen: {last['error']}"))
+        elif last["status"] in ("halted", "failed"):
+            comps.append(_component("bot_core", "DEGRADED", f"letzter Zyklus: {last['status']} (Kill Switch/Fehler, keine neuen Orders)"))
+        else:
+            comps.append(_component("bot_core", "HEALTHY", "Zyklen laufen"))
+
+    # MARKET DATA PROVIDERS: ein Ausfall mit funktionierender Alternative = DEGRADED
+    rows = conn.execute("""SELECT DISTINCT ON (source_id) source_id, status, checked_at, message FROM provider_health
+                           WHERE checked_at >= %s ORDER BY source_id, checked_at DESC""", (now - t.provider_window,)).fetchall()
+    ok = [r["source_id"] for r in rows if r["status"] == "ok"]
+    bad = [r for r in rows if r["status"] in ("down", "degraded")]
+    if not rows:
+        comps.append(_component("market_data_providers", "UNHEALTHY", "keine Provider-Messung im Zeitfenster"))
+    elif not ok:
+        comps.append(_component("market_data_providers", "UNHEALTHY", "keine Marktdatenquelle erreichbar",
+                                sources={r["source_id"]: r["status"] for r in rows}))
+    elif bad:
+        comps.append(_component("market_data_providers", "DEGRADED",
+                                "Ausfall: " + ", ".join(f"{r['source_id']} ({r['status']})" for r in bad) + "; erreichbar: " + ", ".join(ok),
+                                sources={r["source_id"]: r["status"] for r in rows}))
+    else:
+        comps.append(_component("market_data_providers", "HEALTHY", "alle erreichbar", sources={s: "ok" for s in ok}))
+
+    # WEBSOCKET CONNECTIONS (ws-ingestor meldet je Strom den Zustand)
+    b = beats.get("ws-ingestor")
+    if b is None:
+        comps.append(_component("websocket_connections", "DEGRADED" if expect_ws else "HEALTHY",
+                                "ws-ingestor laeuft nicht" if expect_ws else "nicht konfiguriert (REST-Polling)"))
+    elif now - b["last_beat"] > t.ws_max_silence:
+        comps.append(_component("websocket_connections", "DEGRADED", "ws-ingestor ohne Heartbeat"))
+    else:
+        streams = b["details"].get("streams", {})
+        down = [k for k, v in streams.items() if v.get("state") != "live"]
+        # Auch ein komplett ausgefallener WebSocket ist nur DEGRADED: der REST-Zyklus liefert weiter Daten
+        state = "HEALTHY" if streams and not down else "DEGRADED"
+        comps.append(_component("websocket_connections", state, "alle Stroeme live" if not down else "nicht live: " + ", ".join(down),
+                                streams=streams))
+
+    overall = "HEALTHY"
+    for c in comps:
+        if ORDER[c["state"]] > ORDER[overall]:
+            overall = c["state"]
+    return {"state": overall, "checked_at": now.isoformat(), "components": comps}

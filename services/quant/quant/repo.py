@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Iterable, Sequence
 
 import psycopg
 from psycopg.types.json import Jsonb
 
+from .metrics import METRICS
 from .providers.base import Bar
 
 
@@ -76,6 +78,7 @@ def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, sinc
     Liegen fuer einen Zeitpunkt Balken mehrerer Quellen vor (Ersatzquelle bei Ausfall), gewinnt
     `prefer_source`, danach die Rangfolge aus data_sources - nie eine doppelte Zeile je Zeitpunkt.
     """
+    t0 = time.monotonic()
     rows = conn.execute(
         """SELECT DISTINCT ON (b.ts) b.ts, b.open, b.high, b.low, b.close, b.volume, b.quote_volume, b.trade_count,
                   b.taker_buy_volume, b.source_id
@@ -85,6 +88,7 @@ def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, sinc
            ORDER BY b.ts, (b.source_id = %s) DESC NULLS LAST, d.priority NULLS LAST, b.source_id""",
         (instrument_id, timeframe, since, until, source_id, source_id, known_at or until, prefer_source),
     ).fetchall()
+    METRICS.observe("db_query_latency_ms", (time.monotonic() - t0) * 1000, query="load_bars")
     return [Bar(ts=r["ts"], open=r["open"], high=r["high"], low=r["low"], close=r["close"], volume=r["volume"],
                 quote_volume=r["quote_volume"], trade_count=r["trade_count"], taker_buy_volume=r["taker_buy_volume"], is_final=True)
             for r in rows]

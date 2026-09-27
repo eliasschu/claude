@@ -20,6 +20,9 @@ from typing import Callable
 
 import psycopg
 
+from datetime import datetime, timezone
+
+from .heartbeat import beat
 from .runtime import build, stop_event
 
 log = logging.getLogger("quant.worker")
@@ -33,6 +36,25 @@ def backoff_delay(attempt: int, base: float = 1.0, cap: float = MAX_BACKOFF_S, r
     return r.uniform(0, min(cap, base * 2 ** attempt))
 
 
+def _beat(bot, rep, started_at: datetime) -> None:
+    """Heartbeat nach jedem Takt; ein Kill Switch ist DEGRADED (Dienst lebt, handelt aber nicht)."""
+    conn = getattr(bot, "conn", None)
+    if conn is None or not hasattr(conn, "execute"):
+        return
+    if rep is None:
+        status, reason = "HEALTHY", "Takt uebersprungen (Zyklus laeuft in anderer Instanz)"
+    elif rep.kill_switch:
+        status, reason = "DEGRADED", f"Kill Switch: {rep.kill_switch}"
+    elif rep.fallbacks:
+        status, reason = "DEGRADED", "Ersatzquelle aktiv: " + ", ".join(sorted(rep.fallbacks))
+    else:
+        status, reason = "HEALTHY", "Zyklus abgeschlossen"
+    try:
+        beat(conn, "worker", now=datetime.now(timezone.utc), started_at=started_at, status=status, details={"reason": reason})
+    except psycopg.Error:
+        conn.rollback()
+
+
 def run_loop(make_bot: Callable[[], tuple[object, object]], stop: threading.Event, *, max_cycles: int | None = None,
              sleep: Callable[[float], None] | None = None) -> dict:
     """Testbare Hauptschleife. Rueckgabe: Zaehler fuer Tests/Diagnose."""
@@ -41,6 +63,7 @@ def run_loop(make_bot: Callable[[], tuple[object, object]], stop: threading.Even
     bot = None
     settings = None
     attempt = 0
+    started_at = datetime.now(timezone.utc)
     while not stop.is_set() and (max_cycles is None or stats["cycles"] + stats["failed"] + stats["skipped_locked"] < max_cycles):
         if bot is None:
             try:
@@ -57,6 +80,7 @@ def run_loop(make_bot: Callable[[], tuple[object, object]], stop: threading.Even
         started = time.monotonic()
         try:
             rep = bot.run_crypto_cycle()  # type: ignore[attr-defined]
+            _beat(bot, rep, started_at)
             if rep is None:
                 stats["skipped_locked"] += 1
                 log.info("Zyklus uebersprungen: laeuft bereits in anderer Instanz", extra={"event": "cycle_skipped_locked"})

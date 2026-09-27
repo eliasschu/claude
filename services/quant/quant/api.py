@@ -15,7 +15,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi.responses import PlainTextResponse
 from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 
@@ -23,7 +24,8 @@ from . import BOT_VERSION
 from .audit import SignalAuditService
 from .config import load_settings
 from .domain import STRENGTH_DISCLAIMER
-from .health import ProviderHealthService
+from .health import ProviderHealthService, system_health
+from .metrics import METRICS
 from .strategies import StrategyRegistry
 
 NOTICE = {
@@ -78,8 +80,37 @@ Auth = Depends(require_token)
 
 @app.get("/health")
 def health(conn=Depends(db)) -> dict:
+    """Liveness: Prozess und Datenbank erreichbar."""
     conn.execute("SELECT 1")
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready(response: Response, conn=Depends(db)) -> dict:
+    """Readiness ohne Token: nur der Gesamtzustand. 503 nur bei UNHEALTHY (DEGRADED bleibt 200)."""
+    h = system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true")
+    if h["state"] == "UNHEALTHY":
+        response.status_code = 503
+    return {"state": h["state"], "checked_at": h["checked_at"]}
+
+
+@app.get("/health/system", dependencies=[Depends(require_token)])
+def health_system(conn=Depends(db)) -> dict:
+    """Vollstaendige Komponentenansicht: DATABASE, BOT CORE, SCHEDULER, WORKER, PROVIDER, WEBSOCKETS."""
+    return system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true")
+
+
+@app.get("/metrics", dependencies=[Depends(require_token)], response_class=PlainTextResponse)
+def metrics(conn=Depends(db)) -> str:
+    """Prometheus-Textformat: API-Prozess + letzter Stand der Dienste aus ihren Heartbeats."""
+    lines = [METRICS.render()]
+    for b in conn.execute("SELECT service, instance_id, metrics FROM service_heartbeats").fetchall():
+        for name, series in b["metrics"].get("counters", {}).items():
+            for labels, value in series.items():
+                extra = ",".join(f'{k}="{v}"' for k, v in (p.split("=", 1) for p in labels.split(",") if p))
+                lab = f'service="{b["service"]}",instance="{b["instance_id"]}"' + (f",{extra}" if extra else "")
+                lines.append(f"{name}{{{lab}}} {value}")
+    return "\n".join(lines) + "\n"
 
 
 @app.get("/bot/status", dependencies=[Auth])

@@ -26,6 +26,12 @@ def client(db, monkeypatch):
 
 def test_api_requires_token_and_marks_internal_mode(client):
     assert client.get("/health").json() == {"status": "ok"}
+    ready = client.get("/health/ready")
+    assert ready.json()["state"] in ("HEALTHY", "DEGRADED", "UNHEALTHY") and set(ready.json()) == {"state", "checked_at"}
+    assert client.get("/health/system").status_code == 401 and client.get("/metrics").status_code == 401
+    system = client.get("/health/system", headers={"Authorization": "Bearer geheim"}).json()
+    assert {c["component"] for c in system["components"]} >= {"database", "bot_core", "worker", "scheduler", "market_data_providers"}
+    assert "bot_cycles_total" in client.get("/metrics", headers={"Authorization": "Bearer geheim"}).text
     assert client.get("/bot/status").status_code == 401
     r = client.get("/bot/status", headers={"Authorization": "Bearer geheim"})
     assert r.status_code == 200

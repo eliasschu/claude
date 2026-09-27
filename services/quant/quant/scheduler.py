@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from .heartbeat import beat
 from .outcomes import resolve_outcomes
 from .shadow import resolve_shadows
 from .repo import resolve
@@ -42,6 +43,7 @@ def main() -> None:
     bot = None
     attempt = 0
     last_outcomes = datetime.min.replace(tzinfo=timezone.utc)
+    started_at = datetime.now(timezone.utc)
     log.info("scheduler gestartet", extra={"event": "service_started"})
     while not stop.is_set():
         if bot is None:
@@ -57,6 +59,7 @@ def main() -> None:
         conn = bot.conn
         now = datetime.now(timezone.utc)
         try:
+            beat(conn, "scheduler", now=now, started_at=started_at, details={"reason": "laeuft"})
             if equity_due(conn, now):
                 rep = bot.run_equity_cycle()
                 if rep is not None:

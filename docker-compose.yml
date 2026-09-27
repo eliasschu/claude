@@ -1,8 +1,12 @@
-# Lokaler Betrieb bzw. guenstiger Einzelserver (MVP).
-# Frontend laeuft auf Vercel; fuer lokale Tests gibt es das Profil "frontend".
-#   docker compose up -d                      -> postgres, redis, api, bot-worker, scheduler
-#   docker compose --profile frontend up -d   -> zusaetzlich Next.js
-# Der Bot laeuft im bot-worker dauerhaft - unabhaengig davon, ob jemand die Website oeffnet.
+# Betrieb auf einem Einzelserver (MVP, z. B. Hetzner Cloud EU) oder lokal.
+# Die App ist provider-agnostisch: alles laeuft ueber Docker Compose und Umgebungsvariablen.
+#
+#   docker compose up -d                        -> postgres, redis, api, bot-worker, scheduler, backup
+#   docker compose --profile websockets up -d   -> zusaetzlich ws-ingestor (Krypto-WebSockets)
+#   docker compose --profile frontend up -d     -> zusaetzlich Next.js (sonst Vercel)
+#
+# Sicherheit: keine Ports ausser 127.0.0.1:8000 (API, hinter Reverse Proxy/TLS). Die Datenbank ist
+# nur im internen Netz erreichbar. Secrets nur aus services/quant/.env (nie committen).
 
 x-quant: &quant
   build: ./services/quant
@@ -11,20 +15,27 @@ x-quant: &quant
     postgres: { condition: service_healthy }
     redis: { condition: service_started }
   restart: unless-stopped
+  read_only: true
+  tmpfs: ["/tmp"]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
 
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: quant
-      POSTGRES_PASSWORD: quant
-      POSTGRES_DB: quant
+      POSTGRES_USER: ${POSTGRES_USER:-quant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: ${POSTGRES_DB:-quant}
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quant -d quant"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       retries: 20
     restart: unless-stopped
+    # kein "ports:" - die Datenbank ist von aussen nicht erreichbar
 
   redis:
     image: redis:7-alpine
@@ -33,16 +44,69 @@ services:
 
   api:
     <<: *quant
-    command: ["uvicorn", "quant.api:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: ["127.0.0.1:8000:8000"]  # nur lokal; oeffentlich nur hinter Reverse-Proxy mit TLS
+    command: ["uvicorn", "quant.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   bot-worker:
     <<: *quant
     command: ["python", "-m", "quant.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "quant.healthcheck", "worker"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 5m   # erster Start laedt 7 Tage Minutenhistorie nach
 
   scheduler:
     <<: *quant
     command: ["python", "-m", "quant.scheduler"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "quant.healthcheck", "scheduler"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
+
+  ws-ingestor:
+    <<: *quant
+    profiles: ["websockets"]
+    command: ["python", "-m", "quant.ws.ingestor"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "quant.healthcheck", "ws-ingestor"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 1m
+
+  # Taegliches pg_dump mit Aufbewahrung; Kopie nach extern siehe deploy/hetzner/README.md
+  backup:
+    image: postgres:16
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-quant}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      PGDATABASE: ${POSTGRES_DB:-quant}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes: ["./deploy/backup.sh:/backup.sh:ro", "backups:/backups"]
+    entrypoint: ["sh", "/backup.sh"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  # HTTPS fuer die Bot-API (Vercel-Frontend -> Server). Automatische Zertifikate; nur 80/443 offen.
+  proxy:
+    profiles: ["proxy"]
+    image: caddy:2
+    command: ["caddy", "reverse-proxy", "--from", "${API_DOMAIN:?API_DOMAIN in .env setzen}", "--to", "api:8000"]
+    ports: ["80:80", "443:443"]
+    volumes: [caddy_data:/data]
+    depends_on: [api]
+    restart: unless-stopped
 
   frontend:
     profiles: ["frontend"]
@@ -58,3 +122,5 @@ services:
 
 volumes:
   pgdata:
+  backups:
+  caddy_data:

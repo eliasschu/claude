@@ -147,6 +147,7 @@ class BotOrchestrator:
         self.conn.commit()
         if not got:
             return None
+        t0 = _time.monotonic()
         try:
             rep = self._start(scope)
             try:
@@ -154,8 +155,11 @@ class BotOrchestrator:
                 self._finish(rep, "halted" if rep.kill_switch else "completed", universe)
             except Exception as exc:  # Zyklus scheitert sichtbar, der Worker laeuft weiter
                 self.conn.rollback()
+                self.metrics.inc("bot_cycles_total", scope=scope, status="failed")
                 self._finish(rep, "failed", universe, error=f"{exc.__class__.__name__}: {exc}")
                 raise
+            self.metrics.inc("bot_cycles_total", scope=scope, status="halted" if rep.kill_switch else "completed")
+            self.metrics.observe("bot_cycle_duration_ms", (_time.monotonic() - t0) * 1000, scope=scope)
             return rep
         finally:
             if not self.conn.closed and not self.conn.broken:
@@ -397,7 +401,7 @@ class BotOrchestrator:
         for sym, fs in feats.items():
             spot_id = ingested[sym][0]
             snap = self._store_features(rep, fs)
-            for ev in run_signal_engine(self.registry, "crypto", fs, regime):
+            for ev in self._timed_signals("crypto", fs, regime):
                 self._decide(rep, ev, fs, "crypto", regime, snap, price_basis="ask" if ev.direction == "long" else "bid",
                              marks=marks, instrument_id=spot_id)
         self.conn.commit()
@@ -446,11 +450,19 @@ class BotOrchestrator:
         self._process_exits(rep, "equity", as_of)
         for t, fs in feats.items():
             snap = self._store_features(rep, fs)
-            for ev in run_signal_engine(self.registry, "equity", fs, regime):
+            for ev in self._timed_signals("equity", fs, regime):
                 self._decide(rep, ev, fs, "equity", regime, snap, price_basis="close", marks=marks, instrument_id=ids[t])
         self.conn.commit()
 
     # -------------------------------------------------------- gemeinsame Teile
+    def _timed_signals(self, asset_class: str, fs: FeatureSet, regime: RegimeState) -> list[StrategyEvaluation]:
+        out = []
+        for strat in self.registry.for_asset_class(asset_class):
+            t0 = _time.monotonic()
+            out.append(strat.evaluate(fs, regime))
+            self.metrics.observe("strategy_runtime_ms", (_time.monotonic() - t0) * 1000, strategy=strat.spec.strategy_id)
+        return out
+
     def _store_regime(self, rep: CycleReport, regime: RegimeState) -> None:
         self.conn.execute(
             """INSERT INTO regime_snapshots (regime_snapshot_id, cycle_id, scope, as_of, regime_version, labels, features, explanation)
@@ -462,6 +474,9 @@ class BotOrchestrator:
                          payload=regime.as_dict())
 
     def _store_features(self, rep: CycleReport, fs: FeatureSet) -> uuid.UUID:
+        stale = sum(1 for v in fs.values.values() if not v.usable)
+        if stale:
+            self.metrics.inc("stale_data_total", stale, scope=rep.scope)
         sid = uuid.uuid4()
         self.conn.execute(
             """INSERT INTO feature_snapshots (feature_snapshot_id, cycle_id, instrument_id, as_of, feature_version, features)
