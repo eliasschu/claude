@@ -1,4 +1,4 @@
-import { child, childrenNamed, parseXml, textOf, valueOf, type XmlNode } from "../../core/xml.ts";
+import { child, childrenNamed, parseXml, valueOf, type XmlNode } from "../../core/xml.ts";
 import { toPlainText } from "../../core/sanitize.ts";
 
 /* ---------------- Tickerverzeichnis ---------------- */
