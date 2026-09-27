@@ -23,6 +23,9 @@ export const env = {
   coingeckoKey: () => read("COINGECKO_API_KEY"),
   twelveDataKey: () => read("TWELVEDATA_API_KEY"),
   eiaKey: () => read("EIA_API_KEY"),
+  /** Interne Bot-API (services/quant). Nur serverseitig; der Browser sieht weder Adresse noch Token. */
+  botApiUrl: () => read("BOT_API_URL"),
+  botApiToken: () => read("BOT_API_TOKEN"),
   /** Nur fuer lokale Tests: Umleitung der Anbieteradressen auf einen Mock-Server. */
   upstreamOverride: () => read("FW_UPSTREAM_OVERRIDE"),
 };

@@ -1,0 +1,60 @@
+# Lokaler Betrieb bzw. guenstiger Einzelserver (MVP).
+# Frontend laeuft auf Vercel; fuer lokale Tests gibt es das Profil "frontend".
+#   docker compose up -d                      -> postgres, redis, api, bot-worker, scheduler
+#   docker compose --profile frontend up -d   -> zusaetzlich Next.js
+# Der Bot laeuft im bot-worker dauerhaft - unabhaengig davon, ob jemand die Website oeffnet.
+
+x-quant: &quant
+  build: ./services/quant
+  env_file: ./services/quant/.env
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_started }
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: quant
+      POSTGRES_PASSWORD: quant
+      POSTGRES_DB: quant
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quant"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]  # nur Cache/Live-Zustand; Wahrheit liegt in Postgres
+    restart: unless-stopped
+
+  api:
+    <<: *quant
+    command: ["uvicorn", "quant.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8000:8000"]  # nur lokal; oeffentlich nur hinter Reverse-Proxy mit TLS
+
+  bot-worker:
+    <<: *quant
+    command: ["python", "-m", "quant.worker"]
+
+  scheduler:
+    <<: *quant
+    command: ["python", "-m", "quant.scheduler"]
+
+  frontend:
+    profiles: ["frontend"]
+    image: node:22-alpine
+    working_dir: /app
+    volumes: [".:/app"]
+    command: ["sh", "-c", "npm ci && npm run build && npm start"]
+    environment:
+      BOT_API_URL: http://api:8000
+    env_file: [.env.local]
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
