@@ -12,7 +12,7 @@ import { toPlainText } from "../../core/sanitize.ts";
 export interface ThirteenFHolding {
   issuerName: string;
   cusip: string;
-  /** Wert in USD (die Meldung selbst gibt Tausend USD an). */
+  /** Wert in USD, unabhaengig von der Meldeeinheit (siehe VALUE_IN_DOLLARS_SINCE). */
   valueUsd: number;
   shares: number | null;
   shareType: string | null;
@@ -39,20 +39,33 @@ function titleCaseName(raw: string): string {
     .join(" ");
 }
 
-export function parse13FInfoTable(xmlText: string): ThirteenFHolding[] {
+/**
+ * Seit der Formularaenderung der SEC (Release 34-95148) wird die Spalte
+ * `value` in Einreichungen ab dem 03.01.2023 in ganzen US-Dollar gemeldet,
+ * davor in Tausend US-Dollar. Massgeblich ist das Einreichungsdatum, nicht
+ * das Quartalsende.
+ */
+export const VALUE_IN_DOLLARS_SINCE = "2023-01-03";
+
+export function valueMultiplier(filingDate: string): number {
+  return filingDate >= VALUE_IN_DOLLARS_SINCE ? 1 : 1000;
+}
+
+export function parse13FInfoTable(xmlText: string, filingDate: string): ThirteenFHolding[] {
+  const multiplier = valueMultiplier(filingDate);
   const table = child(parseXml(xmlText), "informationTable");
   const entries = childrenNamed(table, "infoTable");
   const holdings: ThirteenFHolding[] = [];
   for (const entry of entries) {
     const issuer = titleCaseName(toPlainText(valueOf(child(entry, "nameOfIssuer")) ?? "", 160));
     const cusip = (valueOf(child(entry, "cusip")) ?? "").trim();
-    const valueThousands = num(valueOf(child(entry, "value")));
-    if (!issuer || !cusip || valueThousands === null) continue;
+    const reportedValue = num(valueOf(child(entry, "value")));
+    if (!issuer || !cusip || reportedValue === null) continue;
     const amt = child(entry, "shrsOrPrnAmt");
     holdings.push({
       issuerName: issuer,
       cusip,
-      valueUsd: valueThousands * 1000,
+      valueUsd: reportedValue * multiplier,
       shares: num(valueOf(child(amt, "sshPrnamt"))),
       shareType: valueOf(child(amt, "sshPrnamtType")),
       investmentDiscretion: valueOf(child(entry, "investmentDiscretion")),

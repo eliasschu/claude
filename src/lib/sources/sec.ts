@@ -107,7 +107,7 @@ export async function getForm13F(cik: number, accession: string, primaryDocument
   const urls = filingUrls(cik, accession, infoTableFile);
   try {
     const res = await fetchSource({ ...COMMON, url: upstream(urls.document), headers: headers(), revalidate: 7 * 86400, parse: parseText, retries: 1 });
-    const holdings = parse13FInfoTable(res.value);
+    const holdings = parse13FInfoTable(res.value, filingDate);
     return { holdings, accession, filingDate, reportDate, documentUrl: urls.document };
   } catch (error) {
     if (error instanceof SourceError && (error.reason === "not_found" || error.reason === "invalid")) return null;

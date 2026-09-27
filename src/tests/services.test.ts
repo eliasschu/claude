@@ -269,8 +269,9 @@ describe("Große Fische (13F)", () => {
     assert.equal(r.data.previousReportDate, "2026-03-31");
 
     assert.deepEqual(r.data.trend.map((t) => t.reportDate), ["2025-12-31", "2026-03-31", "2026-06-30"]);
-    assert.equal(r.data.trend[0].totalValueUsd, 80000 * 1000);
-    assert.equal(r.data.trend[2].totalValueUsd, (150000 + 8000) * 1000);
+    // Einreichungen von 2026: Wert in ganzen US-Dollar gemeldet.
+    assert.equal(r.data.trend[0].totalValueUsd, 80000);
+    assert.equal(r.data.trend[2].totalValueUsd, 150000 + 8000);
 
     const apple = r.data.holdings.find((h) => h.cusip === "037833100")!;
     assert.equal(apple.change, "erhöht");
@@ -283,7 +284,7 @@ describe("Große Fische (13F)", () => {
     assert.equal(oldco.change, "geschlossen");
     assert.equal(oldco.valueUsd, 0);
 
-    assert.equal(r.data.totalValueUsd, (150000 + 8000) * 1000);
+    assert.equal(r.data.totalValueUsd, 150000 + 8000);
   });
 
   test("sperrt die Anzeige, wenn die CIK zu einer anderen Firma gehört als erwartet", async () => {
@@ -344,7 +345,7 @@ describe("Große Fische (13F)", () => {
     assert.equal(picks.length, 1);
     assert.equal(picks[0].cusip, "037833100");
     assert.equal(picks[0].fundCount, 2);
-    assert.equal(picks[0].totalValueUsd, (150000 + 90000) * 1000);
+    assert.equal(picks[0].totalValueUsd, 150000 + 90000);
   });
 });
 

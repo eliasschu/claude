@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { parse13FInfoTable, parseEdgarIndexJson, findInfoTableFile } from "../lib/sources/parsers/sec-13f.ts";
+import { parse13FInfoTable, parseEdgarIndexJson, findInfoTableFile, valueMultiplier } from "../lib/sources/parsers/sec-13f.ts";
 
 const INFO_TABLE_XML = `<?xml version="1.0"?>
 <informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
@@ -33,8 +33,15 @@ const INFO_TABLE_XML = `<?xml version="1.0"?>
 </informationTable>`;
 
 describe("13F-Informationstabelle", () => {
-  test("liest Positionen mit Wert in USD (Meldung gibt Tausend an)", () => {
-    const holdings = parse13FInfoTable(INFO_TABLE_XML);
+  test("Einreichungen ab 03.01.2023 melden den Wert in ganzen US-Dollar", () => {
+    const holdings = parse13FInfoTable(INFO_TABLE_XML, "2026-08-14");
+    assert.equal(holdings[0].valueUsd, 150_000_000);
+    assert.equal(valueMultiplier("2023-01-02"), 1000);
+    assert.equal(valueMultiplier("2023-01-03"), 1);
+  });
+
+  test("liest Positionen aus Einreichungen vor 2023 (Meldung gibt Tausend USD an)", () => {
+    const holdings = parse13FInfoTable(INFO_TABLE_XML, "2022-11-14");
     assert.equal(holdings.length, 2, "Zeile ohne CUSIP wird verworfen, nicht erfunden");
     assert.equal(holdings[0].issuerName, "Apple Inc");
     assert.equal(holdings[0].cusip, "037833100");
