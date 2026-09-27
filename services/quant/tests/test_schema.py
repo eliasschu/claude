@@ -27,23 +27,24 @@ def test_bar_plausibility_is_enforced(db):
     _instrument(db)
     with pytest.raises(psycopg.errors.CheckViolation):
         db.execute(
-            "INSERT INTO bars (instrument_id, source_id, timeframe, ts, open, high, low, close, volume, is_final) "
-            "VALUES ('ins_btcusdt_spot','binance','1m', now(), 100, 90, 95, 99, 1, true)"
+            "INSERT INTO bars (instrument_id, source_id, timeframe, ts, open, high, low, close, volume, is_final, received_at) "
+            "VALUES ('ins_btcusdt_spot','binance','1m', now(), 100, 90, 95, 99, 1, true, now())"
         )
     db.rollback()
 
 
 def test_observations_are_append_only_and_keep_revisions(db):
     t = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    ins = "INSERT INTO observations (series_key, source_id, event_time, effective_time, value, revision) VALUES ('fred:CPIAUCSL','fred',%s,%s,%s,%s)"
-    db.execute(ins, (t, t, 2.9, 0))
-    db.execute(ins, (t, datetime(2026, 10, 1, tzinfo=timezone.utc), 3.0, 1))
+    ins = ("INSERT INTO observations (series_key, source_id, event_time, effective_time, received_time, value, revision) "
+           "VALUES ('fred:CPIAUCSL','fred',%s,%s,%s,%s,%s)")
+    db.execute(ins, (t, t, t, 2.9, 0))
+    db.execute(ins, (t, datetime(2026, 10, 1, tzinfo=timezone.utc), datetime(2026, 10, 1, tzinfo=timezone.utc), 3.0, 1))
     db.commit()
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         db.execute("UPDATE observations SET value = 1")
     db.rollback()
     with pytest.raises(psycopg.errors.UniqueViolation):
-        db.execute(ins, (t, t, 2.8, 0))
+        db.execute(ins, (t, t, t, 2.8, 0))
     db.rollback()
     rows = db.execute("SELECT value, revision FROM observations ORDER BY revision").fetchall()
     assert [(r["value"], r["revision"]) for r in rows] == [(2.9, 0), (3.0, 1)]
@@ -90,3 +91,15 @@ def test_migrations_ship_inside_the_package():
     from quant.db import MIGRATIONS_DIR
     assert MIGRATIONS_DIR.parent == Path(quant.__file__).resolve().parent
     assert len(list(MIGRATIONS_DIR.glob("*.sql"))) >= 2
+
+
+def test_knowledge_time_has_no_db_clock_default(db):
+    """Fix C, Ebene Schema: ohne expliziten Wissenszeitpunkt scheitert der Insert laut."""
+    _instrument(db)
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        db.execute("INSERT INTO bars (instrument_id, source_id, timeframe, ts, open, high, low, close, volume, is_final) "
+                   "VALUES ('ins_btcusdt_spot','binance','1m', now(), 1, 1, 1, 1, 1, true)")
+    db.rollback()
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        db.execute("INSERT INTO observations (series_key, source_id, event_time, effective_time, value) VALUES ('x','fred',now(),now(),1)")
+    db.rollback()

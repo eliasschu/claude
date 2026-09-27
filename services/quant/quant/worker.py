@@ -1,32 +1,94 @@
 """
-bot-worker: dauerhaft laufender Prozess fuer den Krypto-Echtzeitzyklus.
+bot-worker: dauerhaft laufender Prozess fuer den Krypto-Zyklus.
 Laeuft unabhaengig davon, ob jemand die Website geoeffnet hat.
+
+Robustheit
+ * Ein fehlgeschlagener Zyklus beendet den Worker nie.
+ * Bricht die Datenbankverbindung ab, wird sie mit exponentiellem Backoff +
+   Jitter neu aufgebaut (keine aggressive Endlosschleife).
+ * Laeuft der Zyklus bereits in einer anderen Worker-Instanz (Sperre), wird
+   der Takt uebersprungen.
 """
 
 from __future__ import annotations
 
 import logging
+import random
+import threading
 import time
+from typing import Callable
+
+import psycopg
 
 from .runtime import build, stop_event
 
 log = logging.getLogger("quant.worker")
 
+MAX_BACKOFF_S = 60.0
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    settings, bot = build()
-    stop = stop_event()
-    log.info("bot-worker gestartet (Modus %s, Zyklus %ss, Paare %s)", settings.mode, settings.crypto_cycle_seconds, settings.crypto_symbols)
-    while not stop.is_set():
+
+def backoff_delay(attempt: int, base: float = 1.0, cap: float = MAX_BACKOFF_S, rng: random.Random | None = None) -> float:
+    """Exponentiell mit 'full jitter' (AWS-Architekturempfehlung): gleichverteilt in [0, min(cap, base*2^attempt)]."""
+    r = rng or random
+    return r.uniform(0, min(cap, base * 2 ** attempt))
+
+
+def run_loop(make_bot: Callable[[], tuple[object, object]], stop: threading.Event, *, max_cycles: int | None = None,
+             sleep: Callable[[float], None] | None = None) -> dict:
+    """Testbare Hauptschleife. Rueckgabe: Zaehler fuer Tests/Diagnose."""
+    wait = sleep or stop.wait
+    stats = {"cycles": 0, "failed": 0, "skipped_locked": 0, "reconnects": 0}
+    bot = None
+    settings = None
+    attempt = 0
+    while not stop.is_set() and (max_cycles is None or stats["cycles"] + stats["failed"] + stats["skipped_locked"] < max_cycles):
+        if bot is None:
+            try:
+                settings, bot = make_bot()
+                attempt = 0
+            except psycopg.OperationalError as exc:
+                delay = backoff_delay(attempt)
+                attempt += 1
+                stats["reconnects"] += 1
+                log.warning("Datenbank nicht erreichbar", extra={"event": "db_unavailable", "error_type": type(exc).__name__,
+                                                                  "retry_in_s": round(delay, 2)})
+                wait(delay)
+                continue
         started = time.monotonic()
         try:
-            rep = bot.run_crypto_cycle()
-            log.info("Zyklus %s: %s%s", rep.cycle_id, rep.counts, f" KILL SWITCH: {rep.kill_switch}" if rep.kill_switch else "")
-        except Exception:
-            log.exception("Krypto-Zyklus fehlgeschlagen - naechster Versuch im naechsten Takt")
-        stop.wait(max(1.0, settings.crypto_cycle_seconds - (time.monotonic() - started)))
-    log.info("bot-worker beendet")
+            rep = bot.run_crypto_cycle()  # type: ignore[attr-defined]
+            if rep is None:
+                stats["skipped_locked"] += 1
+                log.info("Zyklus uebersprungen: laeuft bereits in anderer Instanz", extra={"event": "cycle_skipped_locked"})
+            else:
+                stats["cycles"] += 1
+                log.info("Zyklus beendet", extra={"event": "cycle_finished", "cycle_id": str(rep.cycle_id), "status": "halted" if rep.kill_switch else "completed",
+                                                  "duration_ms": round((time.monotonic() - started) * 1000), "counts": rep.counts})
+        except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
+            stats["failed"] += 1
+            log.error("Datenbankverbindung verloren - baue neu auf", extra={"event": "db_connection_lost", "error_type": type(exc).__name__})
+            try:
+                bot.conn.close()  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001 - Verbindung ist ohnehin kaputt
+                pass
+            bot = None
+            continue
+        except Exception as exc:  # noqa: BLE001 - ein Zyklusfehler darf den Worker nicht beenden
+            stats["failed"] += 1
+            log.exception("Krypto-Zyklus fehlgeschlagen", extra={"event": "cycle_failed", "error_type": type(exc).__name__})
+        period = getattr(settings, "crypto_cycle_seconds", 60)
+        wait(max(1.0, period - (time.monotonic() - started)))
+    return stats
+
+
+def main() -> None:
+    from .logs import configure_logging
+
+    configure_logging("bot-worker")
+    stop = stop_event()
+    log.info("bot-worker gestartet", extra={"event": "service_started"})
+    run_loop(build, stop)
+    log.info("bot-worker beendet", extra={"event": "service_stopped"})
 
 
 if __name__ == "__main__":

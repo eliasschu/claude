@@ -40,7 +40,7 @@ def resolve(conn: psycopg.Connection, scheme: str, value: str, venue: str = "", 
 
 
 def upsert_bars(conn: psycopg.Connection, instrument_id: str, source_id: str, timeframe: str, bars: Sequence[Bar],
-                adjustment: str = "raw", received_at: datetime | None = None) -> int:
+                adjustment: str = "raw", *, received_at: datetime) -> int:
     """
     Abgeschlossene Balken werden gespeichert; ein bereits finaler Balken wird
     nie ueberschrieben. Offene Balken werden gar nicht gespeichert.
@@ -58,7 +58,7 @@ def upsert_bars(conn: psycopg.Connection, instrument_id: str, source_id: str, ti
         cur.executemany(
             f"""INSERT INTO bars (instrument_id, source_id, timeframe, ts, open, high, low, close, volume, quote_volume,
                                   trade_count, taker_buy_volume, is_final, adjustment, received_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,true,%s,COALESCE(%s, now()))
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,true,%s,%s)
                 ON CONFLICT (instrument_id, source_id, timeframe, adjustment, ts) {conflict}""",
             [(instrument_id, source_id, timeframe, b.ts, b.open, b.high, b.low, b.close, b.volume, b.quote_volume,
               b.trade_count, b.taker_buy_volume, adjustment, received_at) for b in rows],
@@ -67,18 +67,23 @@ def upsert_bars(conn: psycopg.Connection, instrument_id: str, source_id: str, ti
 
 
 def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, since: datetime, until: datetime,
-              source_id: str | None = None, known_at: datetime | None = None) -> list[Bar]:
+              source_id: str | None = None, known_at: datetime | None = None, prefer_source: str | None = None) -> list[Bar]:
     """
     Balken im Zeitfenster [since, until), die zum Zeitpunkt `known_at` (Standard: until)
     bereits vorlagen. Fuer Entscheidungen gilt known_at = Entscheidungszeitpunkt
     (Point-in-Time); nur die nachtraegliche Ergebnisaufloesung darf spaeteres Wissen nutzen.
+
+    Liegen fuer einen Zeitpunkt Balken mehrerer Quellen vor (Ersatzquelle bei Ausfall), gewinnt
+    `prefer_source`, danach die Rangfolge aus data_sources - nie eine doppelte Zeile je Zeitpunkt.
     """
     rows = conn.execute(
-        """SELECT ts, open, high, low, close, volume, quote_volume, trade_count, taker_buy_volume FROM bars
-           WHERE instrument_id=%s AND timeframe=%s AND ts >= %s AND ts < %s AND (%s::text IS NULL OR source_id=%s)
-             AND received_at <= %s
-           ORDER BY ts""",
-        (instrument_id, timeframe, since, until, source_id, source_id, known_at or until),
+        """SELECT DISTINCT ON (b.ts) b.ts, b.open, b.high, b.low, b.close, b.volume, b.quote_volume, b.trade_count,
+                  b.taker_buy_volume, b.source_id
+           FROM bars b LEFT JOIN data_sources d ON d.source_id = b.source_id
+           WHERE b.instrument_id=%s AND b.timeframe=%s AND b.ts >= %s AND b.ts < %s AND (%s::text IS NULL OR b.source_id=%s)
+             AND b.received_at <= %s
+           ORDER BY b.ts, (b.source_id = %s) DESC NULLS LAST, d.priority NULLS LAST, b.source_id""",
+        (instrument_id, timeframe, since, until, source_id, source_id, known_at or until, prefer_source),
     ).fetchall()
     return [Bar(ts=r["ts"], open=r["open"], high=r["high"], low=r["low"], close=r["close"], volume=r["volume"],
                 quote_volume=r["quote_volume"], trade_count=r["trade_count"], taker_buy_volume=r["taker_buy_volume"], is_final=True)
@@ -86,9 +91,18 @@ def load_bars(conn: psycopg.Connection, instrument_id: str, timeframe: str, sinc
 
 
 def record_observation(conn: psycopg.Connection, series_key: str, source_id: str, event_time: datetime, value: float | None,
-                       *, instrument_id: str | None = None, published_time: datetime | None = None,
-                       effective_time: datetime | None = None, value_json: dict | None = None, unit: str | None = None) -> bool:
-    """Neue Beobachtung. Identischer Wert fuer denselben Zeitpunkt -> nichts tun; geaenderter Wert -> neue Revision."""
+                       *, received_at: datetime, instrument_id: str | None = None, published_time: datetime | None = None,
+                       available_at: datetime | None = None, value_json: dict | None = None, unit: str | None = None,
+                       vintage: str | None = None) -> bool:
+    """
+    Neue Point-in-Time-Beobachtung.
+
+    received_at  - wann der BOT den Wert erhalten hat (Bot-/Simulationsuhr, nie die DB-Uhr)
+    available_at - fruehester Zeitpunkt, zu dem der Wert oeffentlich verfuegbar war (z. B. Veroeffentlichung)
+    effective_time = max(received_at, available_at): ab dann darf eine Entscheidung ihn verwenden.
+
+    Identischer Wert fuer denselben Ereigniszeitpunkt -> nichts tun; geaenderter Wert -> neue Revision.
+    """
     latest = conn.execute(
         """SELECT value, value_json, revision FROM observations
            WHERE series_key=%s AND instrument_id IS NOT DISTINCT FROM %s AND source_id=%s AND event_time=%s
@@ -98,12 +112,13 @@ def record_observation(conn: psycopg.Connection, series_key: str, source_id: str
     if latest and latest["value"] == value and latest["value_json"] == value_json:
         return False
     revision = latest["revision"] + 1 if latest else 0
+    effective = max(received_at, available_at) if available_at else received_at
     conn.execute(
-        """INSERT INTO observations (series_key, instrument_id, source_id, event_time, published_time, effective_time,
-                                     value, value_json, unit, revision)
-           VALUES (%s,%s,%s,%s,%s,COALESCE(%s, now()),%s,%s,%s,%s)""",
-        (series_key, instrument_id, source_id, event_time, published_time, effective_time, value,
-         Jsonb(value_json) if value_json is not None else None, unit, revision),
+        """INSERT INTO observations (series_key, instrument_id, source_id, event_time, published_time, received_time,
+                                     effective_time, value, value_json, unit, revision, version)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (series_key, instrument_id, source_id, event_time, published_time, received_at, effective, value,
+         Jsonb(value_json) if value_json is not None else None, unit, revision, vintage or "1"),
     )
     return True
 

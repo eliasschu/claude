@@ -25,9 +25,16 @@ from datetime import timedelta
 from typing import Callable
 
 from .domain import Decision, Evidence, ExitPlan, FeatureSet, Horizon, Invalidation, RegimeState, StrategyEvaluation
-from .freshness import ACCEPTABLE
 
 CANDIDATE_MIN_STRENGTH = 60.0
+
+# Granularitaet (nicht Aktualitaet): Eine Intraday-Strategie darf keine Tages- oder Quartalswerte als
+# Pflichtmerkmal verwenden, auch wenn diese nach ihrer eigenen Regel frisch sind. Funding ("event") ist erlaubt.
+COARSE_FOR_HORIZON = {
+    "intraday": {"end_of_day", "daily", "weekly", "quarterly", "annual"},
+    "swing": {"quarterly", "annual"},
+    "position": set(),
+}
 WATCH_MIN_STRENGTH = 40.0
 
 
@@ -81,9 +88,12 @@ class Strategy:
         if missing:
             reasons = tuple(f"{m}: {fs.unavailable.get(m) or fs.unavailable.get('*') or 'nicht verfügbar'}" for m in missing)
             return self._result(fs, Decision.NO_TRADE, "none", 0.0, "Daten unvollständig - keine Bewertung.", _Score(), None, None, None, reasons)
-        stale = [f for f in self.spec.required_features if fs.values[f].freshness not in ACCEPTABLE[self.spec.time_horizon]]
+        # Aktualitaet nach der Regel der jeweiligen Datenklasse (Funding: Stunden, Trades: Sekunden), nicht global
+        coarse = COARSE_FOR_HORIZON[self.spec.time_horizon]
+        stale = [f for f in self.spec.required_features if not fs.values[f].usable or fs.values[f].freshness in coarse]
         if stale:
-            reasons = tuple(f"{f}: Datenstand '{fs.values[f].freshness}' passt nicht zum Horizont {self.spec.time_horizon}" for f in stale)
+            reasons = tuple(f"{f}: Datenstand '{fs.values[f].freshness}' ({fs.values[f].data_class or 'unbekannte Klasse'}) nicht verwendbar"
+                            for f in stale)
             return self._result(fs, Decision.NO_TRADE, "none", 0.0, "Daten zu alt für diese Strategie.", _Score(), None, None, None, reasons)
         return self._evaluate(fs, regime)
 

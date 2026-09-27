@@ -109,6 +109,10 @@ def test_equity_cycle_and_outcome_resolution(db):
     assert sig and all(s["time_horizon"] == "swing" for s in sig)
     last_bar = db.execute("SELECT max(ts) AS t FROM bars WHERE timeframe='1d'").fetchone()["t"]
     assert last_bar.date().isoformat() == "2026-09-22"
+    # Der Lauf um 19:00 New York muss den heutigen Schlusskurs verwenden, nicht den von gestern
+    snap = db.execute("SELECT features FROM feature_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()["features"]
+    assert snap["values"]["close"]["as_of"].startswith("2026-09-22"), snap["values"]["close"]
+    assert snap["values"]["close"]["freshness"] == "end_of_day"
 
     # Ergebnisaufloesung: Krypto-Signal nach >1 h
     clock.t = START

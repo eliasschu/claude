@@ -104,12 +104,29 @@ def test_outcomes_are_append_only_per_horizon(db):
 def test_point_in_time_observations_and_events(db):
     cycle = _setup(db)
     t = NOW - timedelta(days=30)
-    record_observation(db, "fred:CPI", "fred", t, 2.9, effective_time=NOW - timedelta(days=20))
-    assert not record_observation(db, "fred:CPI", "fred", t, 2.9, effective_time=NOW - timedelta(days=19))
-    record_observation(db, "fred:CPI", "fred", t, 3.1, effective_time=NOW - timedelta(days=5))
+    record_observation(db, "fred:CPI", "fred", t, 2.9, received_at=NOW - timedelta(days=20))
+    assert not record_observation(db, "fred:CPI", "fred", t, 2.9, received_at=NOW - timedelta(days=19))
+    record_observation(db, "fred:CPI", "fred", t, 3.1, received_at=NOW - timedelta(days=5))
     before = observations_as_of(db, "fred:CPI", None, t, NOW - timedelta(days=10))
     after = observations_as_of(db, "fred:CPI", None, t, NOW)
     assert before[0]["value"] == 2.9 and after[0]["value"] == 3.1
     BotEventLog(db).emit("cycle_started", "Zyklus gestartet", cycle_id=cycle)
     db.commit()
     assert db.execute("SELECT count(*) AS n FROM bot_events").fetchone()["n"] == 1
+
+
+def test_observation_knowledge_time_comes_from_bot_clock_not_db_clock(db):
+    """Fix C: received_at/known_since stammt aus der Bot-/Simulationsuhr. Die DB-Uhr (heute) darf nie einfliessen."""
+    sim = datetime(2020, 3, 1, 12, 0, tzinfo=timezone.utc)
+    record_observation(db, "funding_rate", "binance", sim - timedelta(hours=8), 0.0001, received_at=sim)
+    row = db.execute("SELECT received_time, effective_time FROM observations").fetchone()
+    assert row["received_time"] == sim and row["effective_time"] == sim
+    assert observations_as_of(db, "funding_rate", None, sim - timedelta(days=1), sim - timedelta(seconds=1)) == []
+    assert len(observations_as_of(db, "funding_rate", None, sim - timedelta(days=1), sim)) == 1
+
+
+def test_value_is_never_usable_before_publication(db):
+    """available_at in der Zukunft des Empfangs (z. B. Sperrfrist) verschiebt die Nutzbarkeit nach hinten."""
+    got = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    record_observation(db, "x", "fred", got, 1.0, received_at=got, available_at=got + timedelta(hours=3))
+    assert observations_as_of(db, "x", None, got - timedelta(days=1), got + timedelta(hours=2)) == []

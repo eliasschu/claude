@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -14,8 +15,9 @@ from .base import ProviderError
 Transport = Callable[[str, dict[str, Any] | None, dict[str, str] | None], httpx.Response]
 
 
-def default_transport(timeout: float = 10.0) -> Transport:
-    client = httpx.Client(timeout=timeout, headers={"Accept": "application/json, text/csv, */*"})
+def default_transport(timeout: float = 6.0) -> Transport:
+    # Verbindungsaufbau kurz: ein haengender Anbieter darf den Zyklus nicht blockieren
+    client = httpx.Client(timeout=httpx.Timeout(timeout, connect=3.0), headers={"Accept": "application/json, text/csv, */*"})
 
     def send(url: str, params: dict[str, Any] | None, headers: dict[str, str] | None) -> httpx.Response:
         return client.get(url, params=params, headers=headers)
@@ -42,7 +44,8 @@ class HttpSource:
                 resp = self._send(url, params, headers)
             except httpx.HTTPError as exc:
                 last = ProviderError(self.source_id, "unavailable", f"Netzwerkfehler: {exc.__class__.__name__}")
-                time.sleep(min(0.5 * 2**attempt, 4))
+                if attempt < self._retries:
+                    time.sleep(_jitter(attempt))
                 continue
             if resp.status_code == 404:
                 raise ProviderError(self.source_id, "not_found", "Eintrag nicht gefunden")
@@ -51,12 +54,28 @@ class HttpSource:
                 raise ProviderError(self.source_id, "not_configured", f"Zugriff verweigert ({resp.status_code})")
             if resp.status_code in (418, 429) or resp.status_code >= 500:
                 last = ProviderError(self.source_id, "rate_limited" if resp.status_code in (418, 429) else "unavailable", f"Quelle antwortete mit {resp.status_code}")
-                time.sleep(min(0.5 * 2**attempt, 4))
+                if resp.status_code == 418:  # Binance: IP gesperrt - Wiederholen verlaengert die Sperre
+                    break
+                if attempt < self._retries:
+                    time.sleep(_retry_after(resp) or _jitter(attempt))
                 continue
             if resp.status_code >= 400:
                 raise ProviderError(self.source_id, "invalid", f"Quelle antwortete mit {resp.status_code}")
             return resp, response_time(resp)
         raise last or ProviderError(self.source_id, "unavailable", "Quelle nicht erreichbar")
+
+
+def _jitter(attempt: int, base: float = 0.25, cap: float = 2.0) -> float:
+    """Exponentieller Backoff mit Full Jitter; kurz gehalten, damit ein Zyklus nicht blockiert."""
+    return random.uniform(0, min(cap, base * 2 ** attempt))
+
+
+def _retry_after(resp: httpx.Response, cap: float = 5.0) -> float | None:
+    value = resp.headers.get("retry-after")
+    try:
+        return min(float(value), cap) if value else None
+    except ValueError:
+        return None
 
 
 def response_time(resp: httpx.Response) -> datetime:

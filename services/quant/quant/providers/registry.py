@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .base import (
     CryptoMarketProvider, FundamentalProvider, InsiderProvider, InstitutionalProvider, MacroProvider,
     MarketDataProvider, NewsProvider, NotConfiguredProvider, OnChainProvider, OptionsProvider,
 )
 from .binance import BinanceProvider
+from .coinbase import CoinbaseProvider
 from .stooq import StooqProvider
 
 
@@ -23,6 +24,8 @@ class Providers:
     macro: MacroProvider
     onchain: OnChainProvider
     news: NewsProvider
+    # Ersatzquellen fuer Spot-Daten (Kurse, Quote, Orderbuch), in dieser Reihenfolge
+    crypto_fallbacks: list = field(default_factory=list)
 
 
 def default_providers() -> Providers:
@@ -38,4 +41,5 @@ def default_providers() -> Providers:
         macro=NotConfiguredProvider("fred", "FRED/ALFRED"),
         onchain=NotConfiguredProvider("defillama", "On-Chain-Daten"),
         news=NotConfiguredProvider("news", "Nachrichtenfeed"),
+        crypto_fallbacks=[CoinbaseProvider()],
     )

@@ -47,6 +47,12 @@ class FeatureValue:
     strength: float = 0.0
     reliability: Literal["high", "medium", "low"] = "medium"
     note: str | None = None
+    # Datenklasse, nach deren Regel die Aktualitaet bestimmt wurde (freshness.POLICIES)
+    data_class: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        return self.freshness not in ("stale", "unknown")
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)

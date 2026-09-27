@@ -18,7 +18,17 @@ from statistics import fmean, pstdev
 from typing import Sequence
 
 from .domain import FeatureSet, FeatureValue
-from .freshness import Freshness, classify
+from zoneinfo import ZoneInfo
+
+from .freshness import Freshness, assess
+
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def equity_close_time(bar: Bar) -> datetime:
+    """Tatsaechlicher Datenzeitpunkt eines US-Tagesbalkens: Handelsschluss 16:00 New York (sommerzeitkorrekt)."""
+    from datetime import time as _time
+    return datetime.combine(bar.ts.date(), _time(16, 0), tzinfo=NEW_YORK)
 from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, PremiumIndex, Quote
 
 # ---------------------------------------------------------------------------
@@ -29,6 +39,11 @@ from .providers.base import Bar, FundingRate, OpenInterestPoint, OrderBook, Prem
 def final_bars(bars: Sequence[Bar], as_of: datetime, bar_length: timedelta) -> list[Bar]:
     """Nur Balken, die zum Zeitpunkt as_of vollstaendig abgeschlossen waren."""
     return [b for b in bars if b.is_final and b.ts + bar_length <= as_of]
+
+
+def final_equity_bars(bars: Sequence[Bar], as_of: datetime) -> list[Bar]:
+    """US-Tagesbalken sind ab Handelsschluss (16:00 New York) abgeschlossen - nicht erst um Mitternacht UTC."""
+    return [b for b in bars if b.is_final and equity_close_time(b) <= as_of]
 
 
 def sma(values: Sequence[float], n: int) -> float | None:
@@ -171,13 +186,13 @@ class EquityInputs:
 def equity_features(inp: EquityInputs) -> FeatureSet:
     """Tagesbasierte Merkmale fuer Aktien/ETFs (Swing/Position)."""
     fs = FeatureSet(inp.instrument_id, inp.as_of)
-    bars = final_bars(inp.daily, inp.as_of, timedelta(days=1))
-    bench = final_bars(inp.benchmark_daily, inp.as_of, timedelta(days=1))
+    bars = final_equity_bars(inp.daily, inp.as_of)
+    bench = final_equity_bars(inp.benchmark_daily, inp.as_of)
     if len(bars) < 60:
         fs.mark_unavailable("*", f"Zu wenig Tageskerzen ({len(bars)} < 60).")
         return fs
     last = bars[-1]
-    fresh = classify(last.ts + timedelta(days=1), "end_of_day", inp.as_of, max_age=timedelta(days=5))
+    fresh = assess("candle_1d_equity", equity_close_time(last), inp.as_of)
     src = (inp.source_id,)
     closes = [b.close for b in bars]
     vols = [b.volume for b in bars]
@@ -187,7 +202,7 @@ def equity_features(inp: EquityInputs) -> FeatureSet:
         if raw is None:
             fs.mark_unavailable(name, note or "Nicht berechenbar.")
             return
-        fs.add(FeatureValue(name, raw, last.ts, src, fr.cls, pct, z, direction, strength, reliability, note))  # type: ignore[arg-type]
+        fs.add(FeatureValue(name, raw, last.ts, src, fr.cls, pct, z, direction, strength, reliability, note, fr.data_class))  # type: ignore[arg-type]
 
     add("close", last.close)
     add("atr_14", atr(bars, 14))
@@ -261,21 +276,21 @@ class CryptoInputs:
 def crypto_features(inp: CryptoInputs) -> FeatureSet:
     """Intraday-Merkmale fuer Krypto (Spot + Perpetual)."""
     fs = FeatureSet(inp.instrument_id, inp.as_of)
-    src = (inp.source_id,)
+    src = tuple(inp.source_id.split("+"))  # mehrere Quellen, falls eine Ersatzquelle einsprang
     spot = final_bars(inp.spot_1m, inp.as_of, timedelta(minutes=1))
     perp = final_bars(inp.perp_1m, inp.as_of, timedelta(minutes=1))
     if len(spot) < 240:
         fs.mark_unavailable("*", f"Zu wenig Minutenbalken Spot ({len(spot)} < 240).")
         return fs
     last = spot[-1]
-    bar_fresh = classify(last.ts + timedelta(minutes=1), "intraday", inp.as_of)
+    bar_fresh = assess("candle_1m", last.ts + timedelta(minutes=1), inp.as_of)
 
     def add(name: str, raw: float | None, fr: Freshness, *, direction: str = "neutral", strength: float = 0.0,
             pct: float | None = None, z: float | None = None, note: str | None = None, reliability: str = "medium", ts: datetime | None = None) -> None:
         if raw is None:
             fs.mark_unavailable(name, note or "Nicht berechenbar.")
             return
-        fs.add(FeatureValue(name, raw, ts or last.ts, src, fr.cls, pct, z, direction, strength, reliability, note))  # type: ignore[arg-type]
+        fs.add(FeatureValue(name, raw, ts or last.ts, src, fr.cls, pct, z, direction, strength, reliability, note, fr.data_class))  # type: ignore[arg-type]
 
     closes = [b.close for b in spot]
     add("close", last.close, bar_fresh)
@@ -287,7 +302,7 @@ def crypto_features(inp: CryptoInputs) -> FeatureSet:
     if r60 is not None:
         fs.values["ret_60m_pct"] = FeatureValue("ret_60m_pct", r60, last.ts, src, bar_fresh.cls,
                                                 percentile_rank(r60, hist_60), zscore(r60, hist_60), _direction(r60, 0.3, -0.3),  # type: ignore[arg-type]
-                                                _clip01(abs(r60) / 3), "medium")
+                                                _clip01(abs(r60) / 3), "medium", None, bar_fresh.data_class)
     add("realized_vol_60m_pct", realized_vol_pct(closes, 60, 525_600), bar_fresh, note="annualisiert, 1-Minuten-Renditen")
     atr60 = atr(spot[-61:], 60)
     add("atr_1m_60", atr60, bar_fresh)
@@ -309,13 +324,13 @@ def crypto_features(inp: CryptoInputs) -> FeatureSet:
 
     # Handelsplatz-Mikrostruktur
     if inp.quote is not None:
-        qf = classify(inp.quote_observed_at, "intraday", inp.as_of)
+        qf = assess("quote", inp.quote_observed_at, inp.as_of)
         add("spread_bps", inp.quote.spread_bps, qf, ts=inp.quote_observed_at)
     else:
         fs.mark_unavailable("spread_bps", "Kein Bid/Ask verfuegbar.")
     if inp.book is not None and inp.book.ts is not None:
         imb, depth = book_imbalance(inp.book, 10)
-        bf = classify(inp.book.ts, "intraday", inp.as_of)
+        bf = assess("orderbook", inp.book.ts, inp.as_of)
         add("book_imbalance_10bps", imb, bf, ts=inp.book.ts, note="Snapshot; einzeln wenig aussagekraeftig", reliability="low")
         add("book_depth_10bps_quote", depth, bf, ts=inp.book.ts)
     else:
@@ -331,7 +346,7 @@ def crypto_features(inp: CryptoInputs) -> FeatureSet:
     else:
         fs.mark_unavailable("perp_cvd_60m_share", "Zu wenig Perpetual-Balken.")
     if inp.premium is not None:
-        pf = classify(inp.premium.ts, "intraday", inp.as_of)
+        pf = assess("premium_index", inp.premium.ts, inp.as_of)
         basis = (inp.premium.mark_price / inp.premium.index_price - 1) * 1e4 if inp.premium.index_price > 0 else None
         add("perp_basis_bps", basis, pf, ts=inp.premium.ts, note="Mark-Preis gegen Index-Preis (Spot-Korb)")
     else:
@@ -340,7 +355,7 @@ def crypto_features(inp: CryptoInputs) -> FeatureSet:
     if len(fund) >= 10:
         rates = [f.rate for f in fund]
         latest = fund[-1]
-        ff = classify(latest.ts, "event", inp.as_of, max_age=timedelta(hours=latest.interval_hours * 2 + 1))
+        ff = assess("funding", latest.ts, inp.as_of, interval_hours=latest.interval_hours)
         # auf 8 Stunden normiert, damit Kontrakte mit 1-h/4-h-Intervall vergleichbar sind
         rate8h = latest.rate * 8 / latest.interval_hours
         add("funding_rate_8h", rate8h, ff, z=zscore(latest.rate, rates[:-1]), pct=percentile_rank(latest.rate, rates[:-1]),
@@ -349,7 +364,7 @@ def crypto_features(inp: CryptoInputs) -> FeatureSet:
         fs.mark_unavailable("funding_rate_8h", "Zu wenige Funding-Werte.")
     oi = [p for p in inp.open_interest if p.ts <= inp.as_of]
     if len(oi) >= 13:
-        of = classify(oi[-1].ts + timedelta(minutes=5), "intraday", inp.as_of)
+        of = assess("open_interest", oi[-1].ts + timedelta(minutes=5), inp.as_of)
         ch = (oi[-1].contracts / oi[-13].contracts - 1) * 100 if oi[-13].contracts > 0 else None
         add("oi_change_60m_pct", ch, of, ts=oi[-1].ts, strength=_clip01(abs(ch or 0) / 10))
     else:

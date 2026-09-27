@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Sequence
 
 from .domain import RegimeState
-from .features import final_bars, percentile_rank, realized_vol_pct, rolling_series, sma
+from .features import final_bars, final_equity_bars, percentile_rank, realized_vol_pct, rolling_series, sma
 from .providers.base import Bar
 
 REGIME_VERSION = "regime-0.1.0"
@@ -75,13 +75,13 @@ TEXT = {
 
 
 def equity_regime(benchmark_daily: Sequence[Bar], universe_daily: dict[str, Sequence[Bar]], as_of: datetime) -> RegimeState:
-    bars = final_bars(benchmark_daily, as_of, timedelta(days=1))
+    bars = final_equity_bars(benchmark_daily, as_of)
     closes = [b.close for b in bars]
     trend, tf = _trend(closes)
     vol, vf = _volatility(closes, 252)
     above = []
     for series in universe_daily.values():
-        c = [b.close for b in final_bars(series, as_of, timedelta(days=1))]
+        c = [b.close for b in final_equity_bars(series, as_of)]
         s = sma(c, 50)
         if s is not None:
             above.append(c[-1] > s)
