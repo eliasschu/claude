@@ -1,0 +1,47 @@
+"""Konfiguration ausschliesslich aus Umgebungsvariablen (12-Factor, Docker-tauglich)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+
+
+def _env(name: str, default: str | None = None) -> str | None:
+    value = os.environ.get(name)
+    return value.strip() if value and value.strip() else default
+
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str
+    redis_url: str | None
+    # Rechtlicher Entwicklungsmodus: nur 'research' oder 'paper'. 'live' ist gesperrt.
+    mode: str
+    crypto_cycle_seconds: int
+    paper_account_id: str
+    paper_starting_cash: float
+    sec_user_agent: str | None
+    crypto_symbols: tuple[str, ...] = field(default_factory=tuple)
+    equity_symbols: tuple[str, ...] = field(default_factory=tuple)
+
+
+ALLOWED_MODES = ("research", "paper")
+
+
+def load_settings() -> Settings:
+    mode = _env("BOT_MODE", "paper")
+    if mode not in ALLOWED_MODES:
+        raise RuntimeError(
+            f"BOT_MODE={mode!r} ist nicht erlaubt. Bis zur rechtlichen Pruefung laeuft das System nur als research oder paper."
+        )
+    return Settings(
+        database_url=_env("DATABASE_URL", "postgresql://quant:quant@localhost:5432/quant"),
+        redis_url=_env("REDIS_URL"),
+        mode=mode,
+        crypto_cycle_seconds=int(_env("CRYPTO_CYCLE_SECONDS", "60")),
+        paper_account_id=_env("PAPER_ACCOUNT_ID", "paper-main"),
+        paper_starting_cash=float(_env("PAPER_STARTING_CASH", "100000")),
+        sec_user_agent=_env("SEC_EDGAR_USER_AGENT"),
+        crypto_symbols=tuple((_env("CRYPTO_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT") or "").split(",")),
+        equity_symbols=tuple((_env("EQUITY_SYMBOLS", "SPY,QQQ,AAPL,MSFT,NVDA,AMZN,META,GOOGL,TSLA,AMD") or "").split(",")),
+    )

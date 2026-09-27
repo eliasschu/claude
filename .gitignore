@@ -9,3 +9,8 @@ build/
 next-env.d.ts
 .DS_Store
 coverage/
+
+# Bot-Dienst
+services/quant/.env
+__pycache__/
+.pytest_cache/
