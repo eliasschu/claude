@@ -53,11 +53,23 @@ DATA → NORMALIZATION → DATA QUALITY → FEATURES → MARKET REGIME
 - `REJECTED_BY_RISK` vergibt nur die Risk Engine. Das Signal bleibt mit allen fehlgeschlagenen Prüfungen sichtbar.
 - Die **Signalstärke ist keine Wahrscheinlichkeit.** Sie ist die Summe offengelegter Punkte, und jeder Punkt steht an genau einem Evidence-Eintrag.
 
+## Backtest (gleicher Kern wie Paper)
+
+Der Backtest startet den unveränderten `BotOrchestrator` mit Simulationsuhr und Replay-Providern. Jeder Lauf bekommt eine eigene Datenbank. Kosten modelliert `quant/execution.py`: `REALISTIC` ist der Standard, `IDEALIZED` dient nur dem Vergleich. Gebühren sind je Handelsplatz über `EXECUTION_CONFIG` (JSON) einstellbar.
+
+```bash
+BACKTEST_ADMIN_URL=postgresql://quant:quant@localhost:5432/postgres \
+python -m quant.backtest --scope crypto --klines data/BTCUSDT-1m.csv --symbol BTCUSDT --start 2025-01-01 --end 2026-06-30
+```
+
+Der Report (`.md` und `.json`) enthält Kennzahlen je Train-, Validation- und OOS-Segment, Kosten, Forward Returns, MFE/MAE, Benchmark und Warnungen. Einzelne Trades erklärt `GET /trades/{id}/explain`. Details stehen in `docs/architektur/02-produktion-daten-backtest.md`.
+
 ## Tests
 
 ```bash
 pip install -e ".[dev]"
 TEST_ADMIN_DATABASE_URL=postgresql://quant:quant@localhost:5432/quant_test pytest -q
+ruff check quant tests && mypy quant
 ```
 
 Die Datenbanktests legen je Test eine frische Datenbank an. Die Rolle braucht dafür `CREATEDB`. Ohne erreichbare Datenbank werden diese Tests übersprungen.
