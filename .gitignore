@@ -17,3 +17,6 @@ __pycache__/
 
 # lokale Datenbank-Sicherungen (./bot-lokal.sh sichern)
 backups-lokal/
+
+# lokale Pruefberichte (./bot-lokal.sh kennzahlen-pruefen)
+pruefberichte-lokal/

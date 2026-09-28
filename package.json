@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/tests/*.test.ts"
+    "test": "node --experimental-strip-types --test src/tests/*.test.ts",
+    "kennzahlen:pruefen": "node --experimental-strip-types --no-warnings scripts/kennzahlen-pruefen.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

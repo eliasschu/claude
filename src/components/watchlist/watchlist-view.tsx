@@ -19,16 +19,14 @@ interface WatchQuote {
 
 export function WatchlistView() {
   const { symbols, ready, remove, clear } = useWatchlist();
-  const [rows, setRows] = useState<WatchQuote[] | null>(null);
+  // Ergebnis gehoert immer zu einer bestimmten Symbolliste; aendert sie sich, gilt es als "laedt"
+  const key = symbols.join(",");
+  const [loaded, setLoaded] = useState<{ key: string; rows: WatchQuote[] } | null>(null);
+  const rows = symbols.length === 0 ? [] : loaded?.key === key ? loaded.rows : null;
 
   useEffect(() => {
-    if (!ready) return;
-    if (symbols.length === 0) {
-      setRows([]);
-      return;
-    }
+    if (!ready || symbols.length === 0) return;
     let cancelled = false;
-    setRows(null);
     Promise.all(
       symbols.map(async (symbol) => {
         try {
@@ -39,7 +37,7 @@ export function WatchlistView() {
           return { symbol, name: symbol, price: null, currency: null, changePct: null, ok: false, message: "Abruf fehlgeschlagen" };
         }
       }),
-    ).then((data) => { if (!cancelled) setRows(data); });
+    ).then((data) => { if (!cancelled) setLoaded({ key: symbols.join(","), rows: data }); });
     return () => { cancelled = true; };
   }, [symbols, ready]);
 

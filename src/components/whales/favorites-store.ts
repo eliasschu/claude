@@ -53,3 +53,11 @@ export function setOnlyFavorites(value: boolean) {
   }
   window.dispatchEvent(new Event(FAVORITES_EVENT));
 }
+
+/** Fuer useSyncExternalStore: Aenderungen in diesem Tab (Ereignis) und in anderen Tabs (storage). */
+export function subscribeFavorites(cb: () => void) {
+  const onStorage = (e: StorageEvent) => { if (e.key === FAVORITES_KEY || e.key === ONLY_FAVORITES_KEY) cb(); };
+  window.addEventListener(FAVORITES_EVENT, cb);
+  window.addEventListener("storage", onStorage);
+  return () => { window.removeEventListener(FAVORITES_EVENT, cb); window.removeEventListener("storage", onStorage); };
+}

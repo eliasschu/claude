@@ -8,7 +8,7 @@
  *  - "ausgeloest" nur, wenn alle n Perioden die Bedingung erfuellen. Erfuellt eine vorhandene Periode sie nicht,
  *    ist das Ergebnis "nicht ausgeloest" - auch wenn andere Perioden fehlen. Sonst "unzureichende Daten".
  *  - Veraltet richtet sich nach dem Bericht, nicht nach dem Abrufzeitpunkt: endet die juengste Periode mehr als
- *    STALE_DAYS vor dem Pruefdatum, muesste laut ueblichen Meldefristen bereits ein neuerer Bericht vorliegen.
+ *    STALE_DAYS (siehe staleLimit) vor dem Pruefdatum, muesste laut SEC-Fristen bereits ein neuerer Bericht vorliegen.
  *  - Margen sind Prozent (Anteil), Wachstum ist eine relative Veraenderung in Prozent, Abstaende zwischen
  *    Prozentwerten sind Prozentpunkte. Basis <= 0 ergibt keine Wachstumsrate (und bei Umsatz <= 0 keine Marge).
  *  - Freier Cashflow = operativer Cashflow minus Investitionen in Sachanlagen (Zahlungen), gleiche Periode,
@@ -18,7 +18,7 @@
 import { addDays, days, filingIndexUrl, isConsecutive, QUANTITY_LABEL, type NormalizedFacts, type PeriodValue, type Quantity } from "../finance/sec-facts.ts";
 import { describeCriterion, type MeasurableCriterion, type MetricKey, type Period } from "./model.ts";
 
-export const EVAL_VERSION = "kriterien-1.0";
+export const EVAL_VERSION = "kriterien-1.1";
 
 export type AutoStatus = "nicht_ausgeloest" | "ausgeloest" | "unzureichende_daten" | "veraltete_daten" | "nicht_unterstuetzt";
 export const AUTO_STATUS_LABEL: Record<AutoStatus, string> = {
@@ -26,8 +26,32 @@ export const AUTO_STATUS_LABEL: Record<AutoStatus, string> = {
   veraltete_daten: "veraltete Daten", nicht_unterstuetzt: "nicht unterstützt",
 };
 
-/** Tage nach Periodenende, ab denen ein neuerer Bericht faellig waere (10-Q bis 45 Tage, 10-K bis 90 Tage nach Periodenende). */
-export const STALE_DAYS: Record<Period, number> = { quartal: 140, jahr: 455 };
+/**
+ * Produktregel (gewaehlt, nicht von der SEC vorgegeben): Tage nach dem Ende der juengsten Periode, ab denen die Daten als
+ * veraltet gelten, weil laut SEC-Fristen spaetestens dann ein neuerer Bericht vorliegen muesste.
+ * Fristen: 10-Q 40-45 Tage, 10-K 60-90 Tage, 20-F 4 Monate nach Periodenende; dazu etwa eine Woche Puffer.
+ *  quartal          140 = naechstes Quartal (91) + 45 + Puffer
+ *  quartal_vor_fy   190 = juengstes Quartal ist das letzte vor dem Geschaeftsjahresende; der naechste Wert kommt erst
+ *                         mit dem 10-K: 91 + 90 + Puffer
+ *  jahr             455 = naechstes Geschaeftsjahr (365) + 90 (10-K)
+ *  jahr_20f         495 = 365 + 120 (20-F/40-F) + Puffer
+ */
+export const STALE_DAYS = { quartal: 140, quartal_vor_fy: 190, jahr: 455, jahr_20f: 495 } as const;
+
+const FOREIGN_ANNUAL = /^(20-F|40-F)/;
+
+/** Welche Grenze gilt fuer diese Periode? Ohne erkennbares Geschaeftsjahresende gilt die strengere Quartalsgrenze. */
+export function staleLimit(period: Period, anchor: { end: string }, anchorForms: string[], fiscalYearEnds: string[]): { days: number; rule: keyof typeof STALE_DAYS } {
+  if (period === "jahr") return anchorForms.some((f) => FOREIGN_ANNUAL.test(f)) ? { days: STALE_DAYS.jahr_20f, rule: "jahr_20f" } : { days: STALE_DAYS.jahr, rule: "jahr" };
+  // Liegt ein bekanntes Geschaeftsjahresende (+/- ganze Jahre) etwa ein Quartal nach dem Anker?
+  const expectedNext = Date.parse(`${addDays(anchor.end, 91)}T00:00:00Z`);
+  const beforeFy = fiscalYearEnds.some((fy) => {
+    const diff = Math.abs(expectedNext - Date.parse(`${fy}T00:00:00Z`)) / 86400000;
+    const mod = diff % 365.25;
+    return Math.min(mod, 365.25 - mod) <= 10;
+  });
+  return beforeFy ? { days: STALE_DAYS.quartal_vor_fy, rule: "quartal_vor_fy" } : { days: STALE_DAYS.quartal, rule: "quartal" };
+}
 
 export const SUPPORTED: Record<MetricKey, string | null> = {
   operating_margin: null, revenue_growth_yoy: null, fcf_margin: null, free_cash_flow: null, revenue: null,
@@ -74,11 +98,13 @@ export interface CriterionResult {
   evalVersion: string;
 }
 
+const FCF_SCOPE = "Abgezogen wird nur das SEC-Konzept „Zahlungen für Sachanlagen“ (PaymentsToAcquirePropertyPlantAndEquipment bzw. IFRS PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities). Separat gemeldete Zahlungen (z. B. für immaterielle Werte oder Software, Tilgung von Finanzierungsleasing) werden nicht abgezogen; ob aktivierte Software im Sachanlagen-Posten steckt, hängt von der Bilanzierung des Unternehmens ab.";
+
 const CALC: Record<MetricKey, string> = {
   operating_margin: "Operatives Ergebnis ÷ Umsatz × 100 (gleiche Periode, gleiche Währung). Ergebnis in %.",
   revenue_growth_yoy: "(Umsatz ÷ Umsatz derselben Periode des Vorjahres − 1) × 100, beide Werte mit demselben SEC-Konzept. Relative Veränderung in %.",
-  fcf_margin: "(Operativer Cashflow − Investitionen in Sachanlagen) ÷ Umsatz × 100. Ergebnis in %.",
-  free_cash_flow: "Operativer Cashflow − Investitionen in Sachanlagen (Zahlungen), in Millionen der Berichtswährung.",
+  fcf_margin: "(Operativer Cashflow − Zahlungen für Sachanlagen) ÷ Umsatz × 100. Ergebnis in %. " + FCF_SCOPE,
+  free_cash_flow: "Operativer Cashflow − Zahlungen für Sachanlagen, in Millionen der Berichtswährung. " + FCF_SCOPE,
   revenue: "Umsatz in Millionen der Berichtswährung.",
   net_debt_to_ocf: "–",
 };
@@ -215,7 +241,10 @@ export function evaluateCriterion(k: MeasurableCriterion, facts: NormalizedFacts
   const anyFalse = known.some((r) => r.met === false);
   const complete = !gap && missing.length === 0 && results.length === k.consecutive;
   const ageDays = days(anchor.end, today) - 1;
-  const stale = ageDays > STALE_DAYS[k.period];
+  const anchorForms = needs.flatMap((q) => list(q).filter((v) => key(v) === key(anchor)).map((v) => v.source.form));
+  const fyEnds = [...new Set(needs.flatMap((q) => facts.series[q].years.map((v) => v.end)))];
+  const limit = staleLimit(k.period, anchor, anchorForms, fyEnds);
+  const stale = ageDays > limit.days;
 
   const cond = describeCriterion(k);
   const latest = results[0];
@@ -237,9 +266,12 @@ export function evaluateCriterion(k: MeasurableCriterion, facts: NormalizedFacts
     const reasons = [...missing.map((r) => r.note!), ...(gap ? [gap] : [])];
     sentence = `Unzureichende Daten: ${reasons.join(" ")}${known.length ? ` Berechenbar waren ${known.length} von ${k.consecutive} Perioden, alle erfüllen die Bedingung.` : ""}`;
   }
+  const staleText = `Die jüngste gemeldete Periode endete am ${fmtDate(anchor.end)} (vor ${ageDays} Tagen, Grenze ${limit.days} Tage); ein neuerer Bericht wäre fällig, liegt in den SEC-Daten aber nicht vor.`;
   if (stale && status !== "unzureichende_daten") {
-    sentence = `Veraltete Daten: Die jüngste gemeldete Periode endete am ${fmtDate(anchor.end)} (vor ${ageDays} Tagen); ein neuerer Bericht wäre fällig, liegt in den SEC-Daten aber noch nicht vor. Stand dieser Daten – ${sentence}`;
+    sentence = `Veraltete Daten: ${staleText} Stand dieser Daten – ${sentence}`;
     status = "veraltete_daten";
+  } else if (stale) {
+    sentence = `${sentence} Zudem sind die Daten veraltet: ${staleText}`;
   }
   return out(status, sentence, results);
 }

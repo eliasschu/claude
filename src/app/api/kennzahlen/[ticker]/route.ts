@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { findListing } from "@/lib/services/stocks";
 import { getCompanyFacts } from "@/lib/sources/sec";
 import { trimFacts } from "@/lib/finance/sec-facts";
+import { env } from "@/lib/core/env";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,8 @@ export async function GET(_request: Request, context: { params: Promise<{ ticker
   const since = new Date(Date.now() - 10 * 365 * 86400000).toISOString().slice(0, 10);
   return NextResponse.json({
     ok: true, ticker: symbol, facts: trimFacts(facts.data, since),
+    // true = Abrufe gehen an einen lokalen Testserver statt an die SEC (nur Entwicklung) - Pruefskripte brechen dann ab
+    upstreamOverridden: Boolean(env.upstreamOverride()),
     fetchedAt: facts.meta.fetchedAt, stale: facts.meta.stale, staleReason: facts.meta.staleReason ?? null, sourceUrl: facts.meta.sourceUrl,
   }, { headers });
 }

@@ -134,7 +134,12 @@ export function AutoResult({ t, criterionId }: { t: Thesis; criterionId: string 
     <div className="mt-1 text-[12px]">
       <div className="flex flex-wrap items-center gap-1.5">
         <Chip tone={TONE[result.status]}>automatisch: {AUTO_STATUS_LABEL[result.status]}</Chip>
-        <span className="text-[11px] text-faint">geprüft {formatDateTime(run.at)} ({age(run.at)}) · Thesenversion {run.thesisVersion}</span>
+        <span className="text-[11px] text-faint">
+          geprüft {formatDateTime(run.at)} ({age(run.at)}) · Thesenversion {run.thesisVersion}
+          {/* Stand der Unternehmenszahlen getrennt vom Abruf: ein neuer Abruf macht alte Zahlen nicht frisch */}
+          {result.periods[0] ? ` · Zahlen bis ${formatDate(result.periods[0].end)}` : ""}
+          {run.fetch.ok ? ` · SEC-Abruf ${formatDateTime(run.fetch.fetchedAt)}` : ""}
+        </span>
       </div>
       {criterionChanged ? (
         <p className="mt-0.5 text-[11px] text-warn">Dieses Ergebnis gilt für die frühere Fassung „{describeCriterion(result.criterion)}“. Bitte erneut prüfen.</p>

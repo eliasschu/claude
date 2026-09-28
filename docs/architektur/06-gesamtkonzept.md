@@ -292,7 +292,7 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - freier Cashflow;
   - FCF-Marge;
   - Umsatz.
-- Nettoverschuldung ÷ operativer Cashflow ist „nicht unterstützt“, weil die SEC-Daten die Finanzschulden zu uneinheitlich erfassen.
+- Nettoverschuldung ÷ operativer Cashflow ist „nicht unterstützt“, weil die SEC-Daten die Finanzschulden zu uneinheitlich erfassen. Zur Herkunft dieser Kennzahl (statt Nettoverschuldung/EBITDA) siehe Abschnitt 11.
 - **Zustände:** nicht ausgelöst / ausgelöst / unzureichende Daten / veraltete Daten / nicht unterstützt.
 - **Abdeckung:** Angezeigt wird „x von y Kriterien automatisch prüfbar“. Es gibt kein Gesamturteil wie „These intakt“.
 - **Anzeige je Kriterium:**
@@ -319,8 +319,8 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - Umsatz ≤ 0 ergibt keine Marge;
   - ein Vorjahresumsatz ≤ 0 ergibt keine Wachstumsrate.
 - **Einheiten:** Margen stehen in %, Wachstum als relative Veränderung in %, und der Abstand zur Schwelle in Prozentpunkten. Die Beträge sind in Mio. der Berichtswährung angegeben; verschiedene Währungen werden nicht verrechnet.
-- **Freier Cashflow** = operativer Cashflow (`NetCashProvidedByUsedInOperatingActivities`) − Investitionen in Sachanlagen (`PaymentsToAcquirePropertyPlantAndEquipment`), beide aus derselben Periode. Fehlen die Investitionen, gibt es keinen Wert. Andere Investitionen, etwa in Software oder Leasing, sind nicht enthalten.
-- **Veraltet** richtet sich nach dem Bericht, nicht nach dem Abruf: Das jüngste Quartal endet mehr als 140 Tage vor dem Prüftag, bzw. das jüngste Geschäftsjahr mehr als 455 Tage. Dann wäre nach den üblichen Meldefristen bereits ein neuerer Bericht fällig.
+- **Freier Cashflow** = operativer Cashflow (`NetCashProvidedByUsedInOperatingActivities`) − Zahlungen für Sachanlagen (`PaymentsToAcquirePropertyPlantAndEquipment`, IFRS `PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities`), beide aus derselben Periode. Fehlen die Zahlungen für Sachanlagen, gibt es keinen Wert. Zur genauen Abgrenzung siehe Abschnitt 11.
+- **Veraltet** richtet sich nach dem Bericht, nicht nach dem Abruf. Die Grenzen stehen in Abschnitt 11 (Regelversion `kriterien-1.1`).
 
 **Speicherung** (Feld `autoChecks` der These, wird nur ergänzt)
 - Jeder Klick wird als eigener Lauf gespeichert, gebunden an die Thesenversion und mit einer Kopie des Kriteriums.
@@ -349,4 +349,57 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - Banken und Versicherer melden oft kein `OperatingIncomeLoss` und bekommen dann „unzureichende Daten“.
   - Wechselt ein Unternehmen das Umsatzkonzept, ist der Vorjahresvergleich an dieser Stelle nicht möglich.
   - Die Rohantwort der SEC kann mehrere MB groß sein; sie wird deshalb nur normalisiert im Prozess zwischengespeichert.
+
+## 11. Abschlussrunde Etappe D: Stabilität und Echtdatenprüfung
+
+**Lint**
+- Die fünf Fehler (`react-hooks/set-state-in-effect`) sind behoben, ohne eine Regel abzuschalten. Betroffen waren: Theme-Umschalter, Favoritenstern, Favoritenfilter, Watchlist-Speicher und Watchlist-Ansicht.
+- Browser-Speicher wird jetzt über `useSyncExternalStore` gelesen, dasselbe Muster wie beim Thesenspeicher. Änderungen in anderen Tabs kommen jetzt ebenfalls an.
+- Die Watchlist-Ansicht leitet den Ladezustand aus der Symbolliste ab.
+- **Offen:** eine Warnung (`@next/next/no-page-custom-font`) wegen der Google-Fonts-Einbindung im Root-Layout. Im App Router gilt das Root-Layout für alle Seiten, die Warnung zielt aber auf den alten `pages/`-Router. Die Umstellung auf `next/font` würde die Schriften beim Build aus dem Netz laden; das ist ein eigener Umbau und nicht Teil dieser Runde.
+
+**Echtdatenprüfung**
+- Der Befehl `./bot-lokal.sh kennzahlen-pruefen [TICKER …]` (Skript `scripts/kennzahlen-pruefen.ts`, siehe `docs/lokal-mac.md`) holt echte SEC-Antworten und nutzt dieselben Regeln wie die Website.
+- Er bricht ab, wenn eine Umleitung auf einen Testserver gesetzt ist. Auch die Route meldet das jetzt (`upstreamOverridden`), sodass Prüfskripte es erkennen.
+- Der Bericht unterscheidet Abruffehler, fehlende XBRL-Daten und nicht gemeldete Kennzahlen.
+- **Stand:** In dieser Entwicklungsumgebung blockiert der Proxy `sec.gov` (HTTP 403). **Mit echten SEC-Daten ist deshalb noch nichts geprüft.** Nur das Fehlerverhalten des Skripts und seine Berichtsformatierung wurden hier kontrolliert, Letzteres mit der fiktiven Testfirma.
+
+**Kennzahl Nettoverschuldung**
+- Im ursprünglichen Konzept stand „Nettoverschuldung/EBITDA“. Seit Etappe C heißt die auswählbare Kennzahl `net_debt_to_ocf`, „Nettoverschuldung ÷ operativer Cashflow“.
+- Diese Abweichung entstand in Etappe C. Etappe D hat nichts umbenannt oder umgedeutet.
+- Gespeicherte Kriterien mit `net_debt_to_ocf` bleiben genau so bestehen und sind weiterhin „nicht unterstützt“.
+- Eine Kennzahl Nettoverschuldung/EBITDA gibt es derzeit nicht. Käme sie später dazu, dann als eigener, neuer Schlüssel; bestehende Kriterien würden nie umgedeutet.
+
+**Freier Cashflow: belegbare Abgrenzung**
+- Abgezogen wird ausschließlich das Konzept `PaymentsToAcquirePropertyPlantAndEquipment` (IFRS: `PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities`).
+- Separat gemeldete Konzepte werden nicht abgezogen, etwa `PaymentsToAcquireIntangibleAssets`, `PaymentsToDevelopSoftware`, `PaymentsToAcquireProductiveAssets` oder `FinanceLeasePrincipalPayments`.
+- Ob aktivierte Software im Sachanlagen-Posten steckt, hängt von der Bilanzierung des Unternehmens ab. Die frühere Formulierung „ohne Software oder Leasing“ war zu pauschal und ist ersetzt.
+- Das Prüfskript listet je Unternehmen, welche dieser weiteren Konzepte gemeldet, aber nicht abgezogen werden.
+- Meldet ein Unternehmen seine Investitionen nur unter einem anderen Konzept (möglich z. B. bei `PaymentsToAcquireProductiveAssets`), lautet das Ergebnis „unzureichende Daten“. Ein Wert entsteht dann nicht.
+
+**Veraltet-Grenzen** (Produktregeln, gewählt aus den SEC-Fristen: 10-Q 40–45 Tage, 10-K 60–90 Tage, 20-F 4 Monate)
+
+| Fall | Grenze nach Periodenende | Herleitung |
+|---|---|---|
+| Quartal | 140 Tage | nächstes Quartal (91) + 45 + Puffer |
+| Letztes Quartal vor dem Geschäftsjahresende | 190 Tage | nächster Wert kommt erst mit dem 10-K: 91 + 90 + Puffer |
+| Geschäftsjahr (10-K) | 455 Tage | 365 + 90 |
+| Geschäftsjahr (20-F/40-F) | 495 Tage | 365 + 120 + Puffer |
+
+- **Korrektur gegenüber `kriterien-1.0`:** Vorher galt für jedes Quartal 140 Tage und für jedes Geschäftsjahr 455 Tage. Dadurch wurden Unternehmen zwischen Q3 und dem 10-K sowie 20-F-Emittenten zu früh als veraltet markiert.
+- Ohne bekanntes Geschäftsjahresende gilt die strengere Quartalsgrenze.
+- Unternehmen, die nur halbjährlich oder jährlich berichten, haben keine Quartalswerte. Quartalskriterien ergeben dann „unzureichende Daten“, nie ein erfundenes Quartal.
+- **Ein neuer Abruf macht alte Zahlen nicht frisch:**
+  - Die Grenze bezieht sich nur auf das Periodenende. Getestet ist das mit einem Abruf vom selben Tag.
+  - Die Oberfläche zeigt „Zahlen bis …“ getrennt von „SEC-Abruf …“.
+  - Fällt die SEC aus, behält ein Rückgriff auf den letzten erfolgreichen Abruf dessen ursprüngliche Abrufzeit.
+- Frühere Ergebnisse behalten ihre Regelversion (`kriterien-1.0`); neue Läufe tragen `kriterien-1.1`.
+
+**Zahlenabgleich mit Originalberichten**
+- Noch offen, weil er echten Zugriff braucht. Vorgesehen sind AAPL (Geschäftsjahr endet im September, 52/53 Wochen), MSFT (Juni), NVDA (Ende Januar), AMZN (Kalenderjahr) und JPM (Bank, erwartet: keine operative Marge).
+- Zu kontrollieren sind:
+  - Einzelquartale gegenüber kumulierten Werten;
+  - angepasste Vorjahreswerte (R);
+  - Einheiten und Vorzeichen;
+  - Lücken und abweichende Geschäftsjahre.
 

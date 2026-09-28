@@ -143,7 +143,39 @@ describe("Operative Marge", () => {
     assert.equal(evaluateCriterion(k({}), facts, "2026-11-17").status, "ausgeloest", `${STALE_DAYS.quartal} Tage nach Quartalsende noch aktuell`);
     const r = evaluateCriterion(k({}), facts, "2026-11-18");
     assert.equal(r.status, "veraltete_daten");
-    assert.match(r.sentence, /30\.06\.2026 \(vor 141 Tagen\).*Ausgelöst/);
+    assert.match(r.sentence, /30\.06\.2026 \(vor 141 Tagen, Grenze 140 Tage\).*Ausgelöst/);
+  });
+
+  test("Veraltet-Grenze berücksichtigt den Jahresbericht: letztes Quartal vor Geschäftsjahresende 190 Tage", () => {
+    // Q3 2025 endet 30.09.2025, Geschäftsjahr endet 31.12. (Jahreswert 2024 bekannt) - Q4 kommt erst mit dem 10-K
+    const rev = [...quarters([100, 100, 100]), f("2024-01-01", "2024-12-31", 400, "2025-02-10", "10-K")];
+    const oi = [...quarters([10, 10, 10]), f("2024-01-01", "2024-12-31", 40, "2025-02-10", "10-K")];
+    const facts = normalizeCompanyFacts(company({ [REV]: rev, [OI]: oi }));
+    assert.equal(evaluateCriterion(k({}), facts, "2026-03-15").status, "ausgeloest", "166 Tage nach Q3: 10-K darf noch ausstehen");
+    const r = evaluateCriterion(k({}), facts, "2026-04-09");
+    assert.equal(r.status, "veraltete_daten");
+    assert.match(r.sentence, /Grenze 190 Tage/);
+    // Ohne bekanntes Geschäftsjahresende gilt die strengere Grenze
+    assert.equal(evaluateCriterion(k({}), marginFacts([100, 100, 100], [10, 10, 10]), "2026-03-15").status, "veraltete_daten");
+  });
+
+  test("Jahreswerte: 10-K 455 Tage, 20-F 495 Tage", () => {
+    const mk = (form: string) => normalizeCompanyFacts(company({
+      [REV]: [f("2024-01-01", "2024-12-31", 400, "2025-04-20", form)], [OI]: [f("2024-01-01", "2024-12-31", 40, "2025-04-20", form)],
+    }));
+    const kj = k({ period: "jahr", consecutive: 1 });
+    assert.equal(evaluateCriterion(kj, mk("10-K"), "2026-04-15").status, "veraltete_daten");
+    assert.equal(evaluateCriterion(kj, mk("20-F"), "2026-04-15").status, "ausgeloest");
+    assert.equal(evaluateCriterion(kj, mk("20-F"), "2026-05-15").status, "veraltete_daten");
+  });
+
+  test("ein frischer Abruf macht alte Zahlen nicht frisch", () => {
+    const facts = marginFacts([100, 100, 100, 100, 100], [10, 10, 10, 10, 10]);
+    const t = createThesis({ ticker: "BSPL", companyName: "Beispiel AG", stance: "besitzen", reason: "Test", expectations: "", counterArguments: "",
+      changeMyMind: "", horizonMonths: null, nextReviewDate: null, criteria: [k({})], checkpoints: [] }, "2026-09-01T00:00:00.000Z", "t");
+    const run = buildRun(t, { ok: true, ticker: "BSPL", facts, fetchedAt: "2026-09-28T08:00:00.000Z", stale: false, staleReason: null, sourceUrl: null },
+      "2026-09-28T08:00:01.000Z", "2026-09-28", "r");
+    assert.equal(run.results[0].status, "veraltete_daten", "Q1 2026 endete vor 180 Tagen - Abrufzeit spielt keine Rolle");
   });
 
   test("Quartals- und Jahreswerte werden nie gemischt", () => {

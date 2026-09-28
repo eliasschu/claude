@@ -44,6 +44,34 @@ Der erste Start baut das Bot-Image, das dauert einige Minuten. Danach geht es sc
 | `./bot-lokal.sh sichern` | Datenbank-Sicherung nach `backups-lokal/` (nicht im Git) |
 | `./bot-lokal.sh wachhalten` | verhindert den Ruhezustand, solange das Fenster offen ist (`caffeinate`). Ein zugeklapptes MacBook schläft trotzdem, außer am Netzteil mit externem Bildschirm |
 
+## Kennzahlen mit echten SEC-Daten prüfen (Etappe D)
+
+Dafür brauchst du kein Docker, nur Node.js ab Version 22.6. `SEC_EDGAR_USER_AGENT` muss in `.env.local` stehen, mit deinem Namen und deiner E-Mail-Adresse (`./bot-lokal.sh einrichten` trägt ihn dort ein).
+
+```bash
+./bot-lokal.sh kennzahlen-pruefen                 # Standard: AAPL MSFT NVDA AMZN JPM
+./bot-lokal.sh kennzahlen-pruefen AAPL WMT        # eigene Auswahl
+```
+
+Das Skript geht so vor:
+
+- Es prüft die Konfiguration und gibt die SEC-Kennung dabei nie aus.
+- Ist `FW_UPSTREAM_OVERRIDE` gesetzt (Umleitung auf einen Testserver), bricht es ab, statt Testdaten zu verwenden.
+- Es ruft die Company Facts direkt bei der SEC ab und wertet sie mit denselben Regeln aus wie die Website.
+- Läuft die Website (`npm run dev`), vergleicht es zusätzlich deren Route `/api/kennzahlen/…` mit dem Direktabruf.
+
+Der Bericht landet in `pruefberichte-lokal/` (nicht im Git). Die Zeichen darin bedeuten:
+
+| Zeichen | Bedeutung |
+|---|---|
+| ✖ Abruffehler | SEC nicht erreichbar, Zugriff verweigert (Kennung, Proxy oder VPN) oder Abrufgrenze erreicht |
+| ◌ Keine Daten | Unternehmen nicht bei der SEC registriert, oder keine XBRL-Daten vorhanden |
+| „fehlt“ in der Tabelle | Abruf erfolgreich, aber diese Kennzahl wird nicht gemeldet |
+| Δ | Einzelquartal aus kumulierten Werten berechnet |
+| R | Wert wurde später angepasst; es gilt der zuletzt eingereichte |
+
+Danach je Unternehmen einen Bericht-Link öffnen und die Zahlen von Hand vergleichen. Bei Δ-Werten stehen im Bericht nur kumulierte Cashflows („Six/Nine Months Ended“).
+
 ## Wo das Archiv liegt
 
 Das Archiv liegt im Docker-Volume `claude_pgdata`. Es übersteht `stop`/`start`, einen Neustart des Macs und `docker compose down`.

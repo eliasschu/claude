@@ -5,7 +5,8 @@
  *  - Jede inhaltliche Aenderung ist eine NEUE Version mit Zeitpunkt und Pflicht-Begruendung; fruehere Versionen
  *    und das urspruengliche Erstellungsdatum bleiben erhalten.
  *  - Lebenszyklus (aktiv/archiviert) ist getrennt vom Pruefstatus (manuelle Pruefungen, Wiedervorlage).
- *  - Manuelle Pruefungen sind eigene, datierte Eintraege. Automatische Kennzahlpruefungen gibt es erst in Etappe D.
+ *  - Manuelle Pruefungen sind eigene, datierte Eintraege. Automatische Kennzahlpruefungen (autoChecks) sind davon
+ *    getrennt und aendern weder Versionen noch manuelle Pruefungen.
  *  - Nichts hier ist manipulationssicher: Die Daten liegen im Browser und koennen dort veraendert werden.
  */
 

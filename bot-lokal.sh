@@ -11,6 +11,7 @@
 #   ./bot-lokal.sh pruefen      vollstaendige Betriebspruefung mit Bericht (Abruf, keine Doppelten, Sicherung, Website)
 #   ./bot-lokal.sh sicherung-pruefen [datei]   Sicherung probeweise in eine Testdatenbank einspielen und vergleichen
 #   ./bot-lokal.sh wiederherstellen <datei>    Archiv aus einer Sicherung wiederherstellen (fragt nach, sichert vorher)
+#   ./bot-lokal.sh kennzahlen-pruefen [TICKER ...]   echte SEC-Kennzahlen pruefen, Bericht nach ./pruefberichte-lokal/ (ohne Docker)
 #   ./bot-lokal.sh wachhalten   verhindert den Ruhezustand, solange das Fenster offen ist (macOS)
 #
 # Sicherheit: Die Bot-API lauscht nur auf 127.0.0.1 (diesem Rechner), die Datenbank hat gar keinen Port.
@@ -250,6 +251,14 @@ pruefen() {
   [ "$fail" -eq 0 ]
 }
 
+kennzahlen_pruefen() {
+  command -v node >/dev/null 2>&1 || die "Node.js fehlt (mindestens Version 22.6) – https://nodejs.org"
+  local v; v="$(node -p 'process.versions.node')"
+  local major="${v%%.*}" minor; minor="$(printf '%s' "$v" | cut -d. -f2)"
+  if [ "$major" -lt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -lt 6 ]; }; then die "Node.js $v ist zu alt – mindestens 22.6 nötig."; fi
+  node --experimental-strip-types --no-warnings scripts/kennzahlen-pruefen.ts "$@"
+}
+
 wachhalten() {
   command -v caffeinate >/dev/null 2>&1 || die "caffeinate gibt es nur auf macOS."
   say "Der Mac bleibt wach, solange dieses Fenster offen ist (Strg+C beendet)."
@@ -269,5 +278,6 @@ case "${1:-}" in
   sicherung-pruefen) sicherung_pruefen "${2:-}" ;;
   wiederherstellen) wiederherstellen "${2:-}" ;;
   wachhalten) wachhalten ;;
-  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  kennzahlen-pruefen) shift; kennzahlen_pruefen "$@" ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
