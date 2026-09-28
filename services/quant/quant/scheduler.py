@@ -59,10 +59,12 @@ def run_sec(conn, settings, now: datetime) -> dict:
         return totals
     ing = SecIngestor(conn, client, lambda: datetime.now(timezone.utc))
     since = (now - timedelta(days=120)).date()
-    for t in settings.equity_symbols:
+    for t in settings.insider_watchlist:
         cik = tickers.get(t.upper())
         if not cik:
-            continue  # ETFs haben keine Form-4-Meldungen
+            totals["errors"] += 1  # unbekannter Ticker: sichtbar zaehlen statt still ueberspringen
+            log.warning("Ticker nicht bei der SEC", extra={"event": "sec_unknown_ticker", "ticker": t})
+            continue
         try:
             ing.ingest_issuer(cik, since)
             totals["issuers"] += 1
@@ -86,11 +88,24 @@ def run_sec(conn, settings, now: datetime) -> dict:
 
 def run_insider_task(conn, settings) -> dict:
     """SEC-Abruf + Erkennung als ein Durchlauf; das Ergebnis wird unveraenderlich protokolliert."""
-    import uuid
-
     from psycopg.types.json import Jsonb
 
     from .messages import detect_insider_messages
+
+    # Nur ein Durchlauf gleichzeitig (Scheduler und "jetzt abrufen" duerfen sich nicht ueberschneiden).
+    locked = conn.execute("SELECT pg_try_advisory_lock(hashtext('ingest:sec_insider')) AS ok").fetchone()["ok"]
+    if not locked:
+        conn.commit()
+        return {"ok": False, "skipped": True, "error": "Ein anderer Abruf läuft gerade", "new_messages": 0, "issuers": 0, "managers": 0, "errors": 0}
+    try:
+        return _run_insider_task_locked(conn, settings, Jsonb, detect_insider_messages)
+    finally:
+        conn.execute("SELECT pg_advisory_unlock(hashtext('ingest:sec_insider'))")
+        conn.commit()
+
+
+def _run_insider_task_locked(conn, settings, Jsonb, detect_insider_messages) -> dict:
+    import uuid
 
     started = datetime.now(timezone.utc)
     totals = run_sec(conn, settings, started)

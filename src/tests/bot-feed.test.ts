@@ -93,7 +93,7 @@ describe("Aktiensuche", () => {
   });
 
   function mockSec() {
-    process.env.SEC_EDGAR_USER_AGENT = "Finanzwelt Test test@example.org";
+    process.env.SEC_EDGAR_USER_AGENT = "Der junge Kapitalist Test test@example.org";
     const calls: string[] = [];
     globalThis.fetch = (async (input: string | URL) => {
       const url = String(input);
@@ -126,7 +126,7 @@ describe("Aktiensuche", () => {
   });
 
   test("Quellenausfall wird als Hinweis gemeldet statt als leeres Ergebnis verschwiegen", async () => {
-    process.env.SEC_EDGAR_USER_AGENT = "Finanzwelt Test test@example.org";
+    process.env.SEC_EDGAR_USER_AGENT = "Der junge Kapitalist Test test@example.org";
     globalThis.fetch = (async () => new Response("kaputt", { status: 503 })) as typeof fetch;
     const r = await search("apple", 10, "stock");
     assert.equal(r.hits.length, 0);

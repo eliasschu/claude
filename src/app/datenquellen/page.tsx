@@ -114,14 +114,14 @@ export default function SourcesPage() {
 
       <Card>
         <CardHeader
-          title="Vorschlag: bezahlte Stufen (Recherche-Stand, noch nicht umgesetzt)"
-          description="Reine Recherche vom September 2026 – keine Anmeldung, kein Kauf. Preise vor einer echten Umsetzung live gegenprüfen, sie schwankten schon zwischen zwei Recherche-Durchläufen."
+          title="Angebot: kostenlos heute, Bezahlpaket nur als Idee"
+          description="Es gibt derzeit keine Konten, keine Zahlung und nichts zu buchen. Alles unter „Idee“ ist eine zu prüfende Hypothese, kein Versprechen."
         />
         <CardBody className="space-y-2.5 text-[12px] leading-relaxed">
-          <p><span className="font-semibold">Free (wie heute):</span> kuratierte Insider-Watchlist, Große Fische inkl. Konsens-Käufe, Kryptowährungen, Marktleiste mit ETF-Ersatzkursen.</p>
-          <p><span className="font-semibold">Plus (9,99 €):</span> höherer Twelve-Data-Tarif für mehr/aktuellere Kurse und – falls bestätigt – echte Indexstände; größere Insider-Watchlist.</p>
-          <p><span className="font-semibold">Pro (29,99 €):</span> Analystenkonsens/Kursziele (Financial Modeling Prep), Top-500-Live-Ranking (EODHD).</p>
-          <p className="text-warn">Politiker-Offenlegungen sind bewusst in keiner Stufe eingeplant, solange die Lizenzfrage bei Quiver Quantitative ungeklärt ist.</p>
+          <p><span className="font-semibold">Heute verfügbar, kostenlos:</span> Bot-Meldungen mit Originalquellen und Erklärungen, Aktiensuche und Unternehmensanalysen, Insidermeldungen, Große Fische, Märkte und eine Watchlist im eigenen Browser.</p>
+          <p><span className="font-semibold">Idee für einen späteren kostenlosen Einstieg:</span> ausgewählte Meldungen, Originalquellen, grundlegende Erklärungen und eine kleine Watchlist.</p>
+          <p><span className="font-semibold">Idee für ein späteres Bezahlpaket:</span> mehr beobachtete Unternehmen, persönliche Regeln, Berichtsvergleiche, gespeicherte Auswertungen und Benachrichtigungen, aber erst, wenn ein zuverlässiger Hintergrundbetrieb nachgewiesen ist. Preise stehen nicht fest.</p>
+          <p className="text-muted">Kein Paket kann Gewinne garantieren oder Verluste verhindern. Ein Hinweistext schafft keine rechtliche Sicherheit.</p>
         </CardBody>
       </Card>
 

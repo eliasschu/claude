@@ -1,8 +1,8 @@
 {
-  "name": "finanzwelt-app",
+  "name": "der-junge-kapitalist",
   "version": "0.1.0",
   "private": true,
-  "description": "Finanzwelt-App – deutschsprachige Finanzplattform (MVP)",
+  "description": "Der junge Kapitalist – persönliches Recherche- und Beobachtungswerkzeug für Privatanleger",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

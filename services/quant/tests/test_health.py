@@ -84,3 +84,24 @@ def test_metrics_render_prometheus_text():
     text = m.render()
     assert 'provider_requests_total{provider="binance"} 1.0' in text
     assert 'provider_latency_ms_bucket{provider="binance",le="50"} 1' in text and "# TYPE provider_latency_ms histogram" in text
+
+
+def test_local_insider_mode_needs_no_worker_and_reports_ingest(db):
+    import uuid
+
+    from psycopg.types.json import Jsonb
+
+    from quant.health import system_health
+    from quant.heartbeat import beat
+    now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+    beat(db, "scheduler", now=now, started_at=now)
+    h = system_health(db, now, expect_worker=False)
+    names = {c["component"]: c["state"] for c in h["components"]}
+    assert "worker" not in names and "bot_core" not in names
+    assert names["insider_ingest"] == "DEGRADED" and h["state"] == "DEGRADED", "noch kein Abruf: eingeschraenkt, nicht kaputt"
+    db.execute("INSERT INTO ingest_runs VALUES (%s,'sec_insider',%s,%s,true,%s,NULL)", (uuid.uuid4(), now, now, Jsonb({})))
+    assert system_health(db, now, expect_worker=False)["state"] == "HEALTHY"
+    later = now + timedelta(hours=3)
+    beat(db, "scheduler", now=later, started_at=now)
+    stale = system_health(db, later, expect_worker=False)
+    assert {c["component"]: c["state"] for c in stale["components"]}["insider_ingest"] == "DEGRADED"

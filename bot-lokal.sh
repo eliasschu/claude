@@ -7,6 +7,10 @@
 #   ./bot-lokal.sh logs         laufende Protokolle ansehen (Strg+C beendet nur die Anzeige)
 #   ./bot-lokal.sh stop         anhalten - das Meldungsarchiv bleibt erhalten
 #   ./bot-lokal.sh sichern      Datenbank-Sicherung nach ./backups-lokal/
+#   ./bot-lokal.sh jetzt-abrufen   sofort einen SEC-Abruf mit Auswertung ausfuehren (statt auf den 30-Minuten-Takt zu warten)
+#   ./bot-lokal.sh pruefen      vollstaendige Betriebspruefung mit Bericht (Abruf, keine Doppelten, Sicherung, Website)
+#   ./bot-lokal.sh sicherung-pruefen [datei]   Sicherung probeweise in eine Testdatenbank einspielen und vergleichen
+#   ./bot-lokal.sh wiederherstellen <datei>    Archiv aus einer Sicherung wiederherstellen (fragt nach, sichert vorher)
 #   ./bot-lokal.sh wachhalten   verhindert den Ruhezustand, solange das Fenster offen ist (macOS)
 #
 # Sicherheit: Die Bot-API lauscht nur auf 127.0.0.1 (diesem Rechner), die Datenbank hat gar keinen Port.
@@ -46,7 +50,12 @@ get_value() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2-; }
 
 einrichten() {
   [ -f .env ] || cp .env.compose.example .env
-  [ -f "$BOT_ENV" ] || cp services/quant/.env.example "$BOT_ENV"
+  if [ ! -f "$BOT_ENV" ]; then
+    cp services/quant/.env.example "$BOT_ENV"
+    # Lokal laeuft nur der Insider-Betrieb ohne Handels-Worker
+    local tmp; tmp="$(mktemp)"; sed "s|^EXPECT_WORKER=.*|EXPECT_WORKER=false|" "$BOT_ENV" > "$tmp"; cat "$tmp" > "$BOT_ENV"; rm -f "$tmp"
+  fi
+  set_default "$BOT_ENV" EXPECT_WORKER false
 
   set_default .env POSTGRES_PASSWORD "$(rand 32)"
   local pw; pw="$(get_value .env POSTGRES_PASSWORD)"
@@ -76,9 +85,23 @@ einrichten() {
   say "Weiter mit: ./bot-lokal.sh start"
 }
 
+# Gleicht das Datenbank-Passwort an .env an. Noetig, wenn die Konfiguration neu angelegt wurde,
+# das Archiv (Docker-Volume) aber erhalten blieb. Innerhalb des Containers ist der lokale Zugang ohne Passwort erlaubt.
+passwort_abgleichen() {
+  local pw i
+  pw="$(get_value .env POSTGRES_PASSWORD)"
+  for i in $(seq 1 30); do
+    compose exec -T postgres pg_isready -U quant -d quant >/dev/null 2>&1 && break
+    sleep 2
+  done
+  printf "ALTER USER quant WITH PASSWORD '%s';\n" "$pw" | compose exec -T postgres psql -U quant -d quant -q >/dev/null
+}
+
 start() {
   need_docker
   [ -f .env ] && [ -f "$BOT_ENV" ] || die "Zuerst ./bot-lokal.sh einrichten ausführen."
+  compose up -d postgres redis
+  passwort_abgleichen
   compose up -d --build "${SERVICES[@]}"
   say ""
   say "Der Bot läuft. Er ruft alle 30 Minuten neue SEC-Insidermeldungen ab und archiviert neue Erkennungen."
@@ -105,8 +128,126 @@ sichern() {
   need_docker
   mkdir -p backups-lokal
   local file; file="backups-lokal/quant-$(date +%Y%m%d-%H%M%S).dump"
-  compose exec -T postgres pg_dump -U quant -d quant -Fc > "$file"
+  # erst in eine Zwischendatei - eine abgebrochene Sicherung hinterlaesst keine halbe Datei
+  compose exec -T postgres pg_dump -U quant -d quant -Fc > "$file.teil" || { rm -f "$file.teil"; die "Sicherung fehlgeschlagen."; }
+  mv "$file.teil" "$file"
   say "Gesichert: $file"
+  LAST_BACKUP="$file"
+}
+
+sql() { compose exec -T postgres psql -U quant -d "${2:-quant}" -tAq -c "$1"; }
+COUNTS="SELECT (SELECT count(*) FROM bot_messages)||'/'||(SELECT count(*) FROM ingest_runs)||'/'||(SELECT count(*) FROM sec_filings)||'/'||(SELECT count(*) FROM insider_transactions)"
+
+sicherung_pruefen() {
+  need_docker
+  local file="${1:-$(ls -t backups-lokal/*.dump 2>/dev/null | head -1)}"
+  [ -n "$file" ] && [ -f "$file" ] || die "Keine Sicherung gefunden. Zuerst ./bot-lokal.sh sichern."
+  sql "DROP DATABASE IF EXISTS quant_restore_check" postgres
+  sql "CREATE DATABASE quant_restore_check" postgres
+  compose exec -T postgres pg_restore -U quant -d quant_restore_check --no-owner < "$file"
+  local restored; restored="$(sql "$COUNTS" quant_restore_check)"
+  sql "DROP DATABASE quant_restore_check" postgres
+  say "Sicherung $file lässt sich einspielen. Meldungen/Abrufe/Einreichungen/Transaktionen darin: $restored"
+  RESTORED_COUNTS="$restored"
+}
+
+wiederherstellen() {
+  need_docker
+  local file="${1:-}"
+  [ -n "$file" ] && [ -f "$file" ] || die "Aufruf: ./bot-lokal.sh wiederherstellen backups-lokal/DATEI.dump"
+  say "Das ersetzt das aktuelle Archiv durch den Stand aus $file. Vorher wird der jetzige Stand gesichert."
+  read -r -p "Zum Fortfahren JA eingeben: " answer
+  [ "$answer" = "JA" ] || die "Abgebrochen, nichts geändert."
+  sichern
+  compose stop api scheduler
+  sql "DROP DATABASE quant WITH (FORCE)" postgres
+  sql "CREATE DATABASE quant" postgres
+  compose exec -T postgres pg_restore -U quant -d quant --no-owner < "$file"
+  compose start api scheduler
+  say "Wiederhergestellt aus $file. Der vorherige Stand liegt in $LAST_BACKUP."
+}
+
+jetzt_abrufen() {
+  need_docker
+  compose exec -T scheduler python -m quant.jobs insider
+}
+
+# Vollstaendige Betriebspruefung. Die Ausgabe enthaelt keine Zugangsdaten und kann geteilt werden.
+pruefen() {
+  local pass=0 fail=0 limit=0
+  ok() { pass=$((pass+1)); say "  ✔ $*"; }
+  ko() { fail=$((fail+1)); say "  ✖ $*"; }
+  grenze() { limit=$((limit+1)); say "  ◌ Grenze: $*"; }
+
+  say "Betriebsprüfung – Der junge Kapitalist ($(date '+%d.%m.%Y %H:%M'))"
+  say "1. Voraussetzungen"
+  if command -v "$DOCKER" >/dev/null 2>&1 && "$DOCKER" info >/dev/null 2>&1; then ok "Docker läuft"; else ko "Docker läuft nicht"; say "Abbruch."; return 1; fi
+  local ua token webtoken weburl
+  ua="$(get_value "$BOT_ENV" SEC_EDGAR_USER_AGENT)"; token="$(get_value "$BOT_ENV" BOT_API_TOKEN)"
+  webtoken="$(get_value "$WEB_ENV" BOT_API_TOKEN)"; weburl="$(get_value "$WEB_ENV" BOT_API_URL)"
+  case "$ua" in *@*) ok "SEC-Kennung mit E-Mail gesetzt" ;; *) ko "SEC_EDGAR_USER_AGENT fehlt oder ohne E-Mail ($BOT_ENV)" ;; esac
+  [ -n "$token" ] && ok "Bot-Token gesetzt" || ko "BOT_API_TOKEN fehlt ($BOT_ENV)"
+  { [ -n "$token" ] && [ "$token" = "$webtoken" ] && [ "$weburl" = "http://127.0.0.1:8000" ]; } \
+    && ok "Website-Konfiguration (.env.local) passt zum Bot" || ko "Website-Konfiguration (.env.local) passt nicht – ./bot-lokal.sh einrichten"
+
+  say "2. Dienste"
+  local running; running="$(compose ps --status running --services 2>/dev/null | tr '\n' ' ')"
+  for svc in postgres api scheduler; do
+    case " $running " in *" $svc "*) ok "$svc läuft" ;; *) ko "$svc läuft nicht – ./bot-lokal.sh start" ;; esac
+  done
+  local health; health="$(curl -sS -m 10 http://127.0.0.1:8000/health/ready 2>/dev/null || true)"
+  case "$health" in
+    *'"HEALTHY"'*) ok "Bot-API antwortet auf 127.0.0.1:8000, Zustand HEALTHY" ;;
+    *'"DEGRADED"'*) ok "Bot-API antwortet auf 127.0.0.1:8000, Zustand DEGRADED (eingeschränkt, z. B. noch kein erfolgreicher Abruf)" ;;
+    *'"UNHEALTHY"'*) ko "Bot-API meldet UNHEALTHY – Details: curl -H \"Authorization: Bearer …\" 127.0.0.1:8000/health/system" ;;
+    *) ko "Bot-API antwortet nicht" ;;
+  esac
+
+  say "3. Abruf, Speicherung, Auswertung (echte SEC-Daten)"
+  local before after r1 r2
+  before="$(compose exec -T scheduler python -m quant.jobs archiv 2>/dev/null || true)"
+  r1="$(compose exec -T scheduler python -m quant.jobs insider 2>/dev/null || true)"
+  say "     Ergebnis: ${r1:-keine Antwort}"
+  case "$r1" in
+    *'"ok": true'*) ok "SEC-Abruf erfolgreich (neue Meldungen: $(printf '%s' "$r1" | sed -E 's/.*"new_messages": ([0-9]+).*/\1/')) – auch 0 ist ein gültiges Ergebnis" ;;
+    *"lehnt"*) grenze "SEC lehnt ab – Name/E-Mail in SEC_EDGAR_USER_AGENT prüfen" ;;
+    *"nicht erreichbar"*) grenze "SEC nicht erreichbar – Internetverbindung prüfen" ;;
+    *) ko "Abruf fehlgeschlagen" ;;
+  esac
+  r2="$(compose exec -T scheduler python -m quant.jobs insider 2>/dev/null || true)"
+  case "$r1|$r2" in
+    *'"ok": true'*'|'*'"ok": true'*'"new_messages": 0'*) ok "Wiederholter Abruf erzeugt keine doppelten Meldungen" ;;
+    *'"ok": true'*'|'*) ko "Wiederholter Abruf: $r2" ;;
+    *) grenze "Doppelten-Schutz hier nicht prüfbar, weil der Abruf fehlschlug (automatische Tests prüfen ihn)" ;;
+  esac
+  after="$(compose exec -T scheduler python -m quant.jobs archiv 2>/dev/null || true)"
+  say "     Archiv vorher: ${before:-?}"
+  say "     Archiv nachher: ${after:-?}"
+  case "$after" in *'"duplicates": 0'*) ok "Keine doppelten Meldungen im Archiv" ;; *) ko "Archivprüfung fehlgeschlagen" ;; esac
+
+  say "4. Sicherung und Wiederherstellung"
+  if sichern >/dev/null 2>&1 && [ -s "${LAST_BACKUP:-}" ]; then ok "Sicherung erstellt: $LAST_BACKUP"; else ko "Sicherung fehlgeschlagen"; fi
+  local live; live="$(sql "$COUNTS" 2>/dev/null || true)"
+  if sicherung_pruefen "${LAST_BACKUP:-}" >/dev/null 2>&1 && [ "${RESTORED_COUNTS:-x}" = "$live" ]; then
+    ok "Wiederherstellungsprobe: gleiche Anzahl Datensätze ($live)"
+  else ko "Wiederherstellungsprobe: ${RESTORED_COUNTS:-fehlgeschlagen} statt $live"; fi
+
+  say "5. Lokale Website"
+  local page; page="$(curl -fsS -m 30 http://localhost:3000/ 2>/dev/null || true)"
+  if [ -z "$page" ]; then grenze "Website läuft nicht (zweites Terminal: npm run dev) – nicht geprüft"
+  else
+    case "$page" in
+      *"Bot aktiv"*) ok "Website zeigt: Bot aktiv (mit letztem erfolgreichem Abruf)" ;;
+      *"Daten veraltet"*|*"Letzter Abruf fehlgeschlagen"*|*"noch kein erfolgreicher Abruf"*) ok "Website zeigt den Bot mit Warnhinweis (Details auf der Startseite)" ;;
+      *"Bot nicht erreichbar"*|*"Kein Bot verbunden"*) ko "Website erreicht den Bot nicht – npm run dev nach ./bot-lokal.sh einrichten neu starten" ;;
+      *) ko "Website antwortet, Bot-Zustand nicht erkennbar" ;;
+    esac
+  fi
+
+  say ""
+  say "Ergebnis: $pass bestanden, $fail fehlgeschlagen, $limit Grenze(n)."
+  say "Hinweis: Der Bot arbeitet nur, solange dieser Mac wach und online ist. Die öffentliche Website erreicht dieses Archiv nicht."
+  [ "$fail" -eq 0 ]
 }
 
 wachhalten() {
@@ -123,6 +264,10 @@ case "${1:-}" in
   status) status ;;
   logs) need_docker; compose logs -f --tail 100 scheduler api ;;
   sichern) sichern ;;
+  jetzt-abrufen) jetzt_abrufen ;;
+  pruefen) pruefen ;;
+  sicherung-pruefen) sicherung_pruefen "${2:-}" ;;
+  wiederherstellen) wiederherstellen "${2:-}" ;;
   wachhalten) wachhalten ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

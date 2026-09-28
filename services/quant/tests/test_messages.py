@@ -170,7 +170,7 @@ def test_run_log_and_status_endpoint(db, monkeypatch):
     import quant.scheduler as sched
     from quant.heartbeat import beat
 
-    settings = SimpleNamespace(sec_user_agent="Test test@example.org", equity_symbols=("TST",), sec_13f_managers=())
+    settings = SimpleNamespace(sec_user_agent="Test test@example.org", insider_watchlist=("TST",), sec_13f_managers=())
     real_now = datetime.now(timezone.utc)
     shifted = [(a, (real_now - timedelta(hours=8)).date().isoformat(), r, (real_now - timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), fo, d)
                for a, _f, r, _acc, fo, d in FILINGS[:3]]
@@ -210,3 +210,46 @@ def test_run_log_and_status_endpoint(db, monkeypatch):
         assert body["archive"]["messages"] >= 1 and body["scheduler_last_beat"]
     finally:
         api.app.dependency_overrides.clear()
+
+    out3 = sched.run_insider_task(db, settings)  # Quelle weiterhin aus: kein Doppel, kein Fehlalarm
+    assert out3["new_messages"] == 0
+
+
+def test_repeated_runs_never_duplicate_and_concurrent_run_is_skipped(db, monkeypatch):
+    from types import SimpleNamespace
+
+    import psycopg as pg
+
+    import quant.scheduler as sched
+    from quant.jobs import archive_summary
+
+    real_now = datetime.now(timezone.utc)
+    rows = [(a, (real_now - timedelta(hours=8)).date().isoformat(), r, (real_now - timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), fo, d)
+            for a, _f, r, _acc, fo, d in FILINGS[:3]]
+
+    class FakeClient:
+        def __init__(self, *_a):
+            self.inner = client(rows)
+
+        def ticker_map(self):
+            return {"TST": "42"}
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    monkeypatch.setattr("quant.sec.client.SecClient", FakeClient)
+    settings = SimpleNamespace(sec_user_agent="Test test@example.org", insider_watchlist=("TST",), sec_13f_managers=())
+    first = sched.run_insider_task(db, settings)
+    again = sched.run_insider_task(db, settings)
+    assert first["new_messages"] == 2 and again["new_messages"] == 0
+    summary = archive_summary(db)
+    assert summary["messages"] == 2 and summary["duplicates"] == 0 and summary["ok_runs"] == 2
+
+    other = pg.connect(db.info.dsn, password=db.info.password, autocommit=True)
+    try:
+        other.execute("SELECT pg_advisory_lock(hashtext('ingest:sec_insider'))")
+        skipped = sched.run_insider_task(db, settings)
+        assert skipped.get("skipped") and skipped["ok"] is False
+    finally:
+        other.close()
+    assert archive_summary(db)["runs"] == 2, "uebersprungener Lauf wird nicht als Abruf gezaehlt"

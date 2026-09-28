@@ -35,9 +35,15 @@ class Settings:
     shadow_execution: bool = True
     fred_api_key: str | None = None
     sec_13f_managers: tuple[str, ...] = field(default_factory=tuple)
+    # Unternehmen, deren SEC-Insidermeldungen der Bot beobachtet. Muss mit der Website uebereinstimmen
+    # (src/config/movers.ts, STOCK_MOVER_UNIVERSE) - ein Test prueft das.
+    insider_watchlist: tuple[str, ...] = field(default_factory=tuple)
 
 
 ALLOWED_MODES = ("research", "paper")
+DEFAULT_INSIDER_WATCHLIST = "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,JPM"
+# Welche Ereignisarten der Bot je Unternehmen der Beobachtungsliste tatsaechlich ueberwacht.
+MONITORED_EVENT_TYPES = ("sec_form4_insider",)
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -73,4 +79,5 @@ def load_settings() -> Settings:
         fred_api_key=_env("FRED_API_KEY"),
         # Standard: Berkshire, Bridgewater, Renaissance, Pershing Square, Appaloosa (CIKs wie in src/config/whales.ts)
         sec_13f_managers=tuple((_env("SEC_13F_MANAGERS", "1067983,1350694,1037389,1336528,1006438") or "").split(",")),
+        insider_watchlist=tuple(t.strip().upper() for t in (_env("INSIDER_WATCHLIST", DEFAULT_INSIDER_WATCHLIST) or "").split(",") if t.strip()),
     )

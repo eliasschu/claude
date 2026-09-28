@@ -35,7 +35,7 @@ function route(handlers: Handler[]) {
 
 beforeEach(() => {
   calls = [];
-  process.env.SEC_EDGAR_USER_AGENT = "Finanzwelt Test test@example.org";
+  process.env.SEC_EDGAR_USER_AGENT = "Der junge Kapitalist Test test@example.org";
   delete process.env.TWELVEDATA_API_KEY;
   delete process.env.COINGECKO_API_KEY;
 });

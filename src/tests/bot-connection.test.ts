@@ -11,7 +11,7 @@ const status = (p: Partial<ArchiveStatus>): BotResult<ArchiveStatus> => ({
     data: {
       interval_minutes: 30, last_success_at: "2026-09-28T11:40:00Z", last_success_details: null, last_attempt_at: "2026-09-28T11:40:00Z",
       last_attempt_ok: true, last_attempt_error: null, scheduler_last_beat: "2026-09-28T11:59:00Z",
-      archive: { messages: 3, first_detected: null, last_detected: null }, server_time: now.toISOString(), ...p,
+      archive: { messages: 3, first_detected: null, last_detected: null }, watchlist: [], server_time: now.toISOString(), ...p,
     },
   },
 });

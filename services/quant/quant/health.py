@@ -84,7 +84,11 @@ def _component(name: str, state: str, reason: str, **extra) -> dict:
 
 
 def system_health(conn: Conn, now: datetime, t: HealthThresholds = HealthThresholds(),
-                  expect_ws: bool = False) -> dict:
+                  expect_ws: bool = False, expect_worker: bool = True) -> dict:
+    """
+    expect_worker=False: lokaler Insider-Betrieb (z. B. auf dem Mac) ohne Handels-Worker. Worker, Krypto-Zyklen und
+    Marktdatenquellen werden dann nicht verlangt; massgeblich ist der SEC-Insiderabruf.
+    """
     comps: list[dict] = []
     # DATABASE
     started = time.monotonic()
@@ -111,8 +115,16 @@ def system_health(conn: Conn, now: datetime, t: HealthThresholds = HealthThresho
         else:
             comps.append(_component(name, b["status"], b["details"].get("reason", "laeuft"), last_beat=b["last_beat"].isoformat()))
 
-    service("worker", t.worker_max_silence)
+    if expect_worker:
+        service("worker", t.worker_max_silence)
     service("scheduler", t.scheduler_max_silence)
+    insider = _insider_ingest(conn, now)
+    # Im Serverbetrieb zaehlt der Insiderabruf erst, sobald er einmal gelaufen ist; lokal ist er die Hauptaufgabe.
+    if not expect_worker or insider["state"] != "DEGRADED" or insider.get("ran"):
+        comps.append({k: v for k, v in insider.items() if k != "ran"})
+    if not expect_worker:
+        comps.append(_component("trading_engine", "HEALTHY", "nicht aktiv (lokaler Insider-Betrieb ohne Handels-Worker)"))
+        return _overall(comps, now)
 
     # BOT CORE: letzter Krypto-Zyklus
     # Aktualitaet am juengsten (auch laufenden) Zyklus, Zustand am juengsten ABGESCHLOSSENEN
@@ -165,8 +177,30 @@ def system_health(conn: Conn, now: datetime, t: HealthThresholds = HealthThresho
         comps.append(_component("websocket_connections", state, "alle Stroeme live" if not down else "nicht live: " + ", ".join(down),
                                 streams=streams))
 
+    return _overall(comps, now)
+
+
+def _overall(comps: list[dict], now: datetime) -> dict:
     overall = "HEALTHY"
     for c in comps:
         if ORDER[c["state"]] > ORDER[overall]:
             overall = c["state"]
     return {"state": overall, "checked_at": now.isoformat(), "components": comps}
+
+
+# Abrufintervall des Insider-Abgleichs (siehe scheduler.SEC_INTERVAL); veraltet nach drei verpassten Laeufen.
+INSIDER_STALE_AFTER = timedelta(minutes=90)
+
+
+def _insider_ingest(conn: Conn, now: datetime) -> dict:
+    """SEC-Insiderabruf: ein Quellenausfall ist DEGRADED (Archiv bleibt nutzbar), nie UNHEALTHY."""
+    row = conn.execute("SELECT max(finished_at) FILTER (WHERE ok) AS last_ok, max(finished_at) AS last_try FROM ingest_runs "
+                       "WHERE task='sec_insider'").fetchone()
+    if not row or row["last_ok"] is None:
+        ran = bool(row and row["last_try"])
+        return _component("insider_ingest", "DEGRADED", "noch kein erfolgreicher SEC-Abruf", ran=ran)
+    age = now - row["last_ok"]
+    if age > INSIDER_STALE_AFTER:
+        return _component("insider_ingest", "DEGRADED", f"letzter erfolgreicher Abruf vor {age.total_seconds() / 60:.0f} min",
+                          last_success=row["last_ok"].isoformat(), ran=True)
+    return _component("insider_ingest", "HEALTHY", "Abrufe laufen", last_success=row["last_ok"].isoformat())

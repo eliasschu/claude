@@ -78,6 +78,8 @@ export interface ArchiveStatus {
   last_attempt_error: string | null;
   scheduler_last_beat: string | null;
   archive: { messages: number; first_detected: string | null; last_detected: string | null };
+  /** Tatsaechlich ueberwachte Unternehmen und Ereignisarten. */
+  watchlist: { ticker: string; monitors: string[] }[];
   server_time: string;
 }
 

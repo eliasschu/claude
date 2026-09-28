@@ -89,7 +89,8 @@ def health(conn=Depends(db)) -> dict:
 @app.get("/health/ready")
 def health_ready(response: Response, conn=Depends(db)) -> dict:
     """Readiness ohne Token: nur der Gesamtzustand. 503 nur bei UNHEALTHY (DEGRADED bleibt 200)."""
-    h = system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true")
+    h = system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true",
+                      expect_worker=os.environ.get("EXPECT_WORKER", "true") != "false")
     if h["state"] == "UNHEALTHY":
         response.status_code = 503
     return {"state": h["state"], "checked_at": h["checked_at"]}
@@ -98,7 +99,8 @@ def health_ready(response: Response, conn=Depends(db)) -> dict:
 @app.get("/health/system", dependencies=[Depends(require_token)])
 def health_system(conn=Depends(db)) -> dict:
     """Vollstaendige Komponentenansicht: DATABASE, BOT CORE, SCHEDULER, WORKER, PROVIDER, WEBSOCKETS."""
-    return system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true")
+    return system_health(conn, datetime.now(timezone.utc), expect_ws=os.environ.get("EXPECT_WEBSOCKETS", "false") == "true",
+                      expect_worker=os.environ.get("EXPECT_WORKER", "true") != "false")
 
 
 @app.get("/metrics", dependencies=[Depends(require_token)], response_class=PlainTextResponse)
@@ -285,6 +287,7 @@ def list_messages(conn=Depends(db), limit: int = Query(50, ge=1, le=500), ticker
 @app.get("/messages/status", dependencies=[Auth])
 def messages_status(conn=Depends(db)) -> dict:
     """Letzter erfolgreicher und letzter versuchter Abruf, Lebenszeichen des Schedulers, Umfang des Archivs."""
+    from .config import MONITORED_EVENT_TYPES
     from .scheduler import SEC_INTERVAL
 
     last_ok = conn.execute("SELECT finished_at, details FROM ingest_runs WHERE task='sec_insider' AND ok ORDER BY finished_at DESC LIMIT 1").fetchone()
@@ -301,6 +304,7 @@ def messages_status(conn=Depends(db)) -> dict:
         "last_attempt_error": last_try["error_summary"] if last_try else None,
         "scheduler_last_beat": beat_row["last_beat"] if beat_row else None,
         "archive": archive,
+        "watchlist": [{"ticker": t, "monitors": list(MONITORED_EVENT_TYPES)} for t in load_settings().insider_watchlist],
         "server_time": datetime.now(timezone.utc),
     })
 
