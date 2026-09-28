@@ -29,8 +29,8 @@ Legende:
 | Interne Handelssignal-Engine (Paper) | ✔ | ✔ | ✖ | bleibt intern |
 | Meldungsdetailseite, Archiv mit Filtern und Abdeckungslücken, verknüpfte Berichtigungen und Erweiterungen, Kursverlauf ab Veröffentlichung und ab Erkennung | ✔ | ✔ (Regeln, Verknüpfungen, Prüfsumme, Kursverlauf; End-to-End mit Testfirma) | ✖ | Etappe B. Neuordnung der Aktienseite noch offen |
 | „Was hat sich verändert?“ für die Watchlist | ✖ | ✖ | ✖ | Etappe C |
-| Thesen-Tagebuch (lokal): Versionen mit Pflichtgrund, manuelle Prüfungen, Wiedervorlage, Archiv, Export/Import/Löschen | ✔ | ✔ (Modell, Konflikte; Browser-Ablauf mit Testfirma) | – (nur im Browser) | Etappe C. Automatische Kriterienprüfung: Etappe D |
-| Berichtsvergleiche (Quartal/Jahr) | ✖ | ✖ | ✖ | Etappe D |
+| Thesen-Tagebuch (lokal): Versionen mit Pflichtgrund, manuelle Prüfungen, Wiedervorlage, Archiv, Export/Import/Löschen | ✔ | ✔ (Modell, Konflikte; Browser-Ablauf mit Testfirma) | – (nur im Browser) | Etappe C; automatische Kriterienprüfung seit Etappe D |
+| Automatische Kriterienprüfung aus SEC Company Facts (Marge, Umsatzwachstum, freier Cashflow, FCF-Marge, Umsatz; nur auf Klick) | ✔ | ✔ (fiktive Daten; Echtdaten-Test offen) | – (Ergebnisse nur im Browser) | Etappe D |
 | Persönliche Szenarien, Bewertungsverlauf | ✖ | ✖ | ✖ | Etappe E |
 | Regeln, Prüfungen, Wochenrückblick | ✖ | ✖ | ✖ | Etappe F |
 | Konten, Bezahlpaket, externe Benachrichtigungen | ✖ | ✖ | ✖ | erst nach zuverlässigem Hintergrundbetrieb |
@@ -281,3 +281,72 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - Zustände: nicht ausgelöst, ausgelöst, unzureichende Daten, veraltet, nicht unterstützt;
   - Abdeckung, etwa „2 von 3 prüfbar“.
 - Nettoverschuldung ÷ operativer Cashflow nur bei vollständigen Komponenten.
+
+## 10. Etappe D: Ergebnis (automatische Kriterienprüfung)
+
+**Was funktioniert**
+- An jedem gespeicherten Kriterium gibt es jetzt eine automatische Prüfung mit SEC-Unternehmenszahlen (XBRL Company Facts). Sie läuft nur, wenn man in der These auf „Jetzt prüfen“ klickt. Es gibt keine Hintergrundüberwachung und keine Benachrichtigung.
+- Automatisch prüfbar sind:
+  - operative Marge;
+  - Umsatzwachstum gegenüber der Vorjahresperiode;
+  - freier Cashflow;
+  - FCF-Marge;
+  - Umsatz.
+- Nettoverschuldung ÷ operativer Cashflow ist „nicht unterstützt“, weil die SEC-Daten die Finanzschulden zu uneinheitlich erfassen.
+- **Zustände:** nicht ausgelöst / ausgelöst / unzureichende Daten / veraltete Daten / nicht unterstützt.
+- **Abdeckung:** Angezeigt wird „x von y Kriterien automatisch prüfbar“. Es gibt kein Gesamturteil wie „These intakt“.
+- **Anzeige je Kriterium:**
+  - die Bedingung;
+  - ein Ergebnissatz;
+  - die Werte je Periode;
+  - die Eingangswerte mit SEC-Konzept, Einheit, Zeitraum, Formular und Einreichungsdatum, jeweils mit Link zur Einreichung;
+  - der Rechenweg und das Alter der Prüfung.
+- **Privatsphäre:** Nur das Börsenkürzel geht an die eigene Route `/api/kennzahlen/[ticker]`, nie Thesentexte. Die Route nutzt die bestehende SEC-Anbindung:
+  - User-Agent;
+  - zentrale Drosselung auf 8 Anfragen je Sekunde;
+  - 1 Stunde Zwischenspeicher für die normalisierten Daten;
+  - bis zu 24 Stunden den letzten erfolgreichen Abruf, wenn die SEC ausfällt (als älterer Abruf gekennzeichnet).
+
+**Auswahl- und Rechenregeln** (`src/lib/finance/sec-facts.ts`, `src/lib/thesis/criteria-eval.ts`, Regelversion `kriterien-1.0`)
+- **Perioden:** Die Art ergibt sich aus der Länge: Quartal 80–100 Tage, Halbjahr 170–190, neun Monate 260–285, Geschäftsjahr 350–380. Quartal und Geschäftsjahr werden nie gemischt.
+- **Einzelquartale:** Direkt gemeldete Quartale haben Vorrang. Fehlt eines, wird es nur aus kumulierten Werten mit demselben Periodenbeginn, demselben Konzept und derselben Währung abgeleitet (6M − 3M, 9M − 6M, Jahr − 9M). Der Rechenweg wird angezeigt.
+- **Berichtigungen:** Gibt es für denselben Zeitraum mehrere Einreichungen (Berichtigung, spätere Vergleichszahl), gilt die zuletzt eingereichte. Frühere, abweichende Werte bleiben sichtbar.
+- **Konzepte:** Es gibt eine feste Vorrangliste (US-GAAP, dann IFRS), und das verwendete Konzept steht an jedem Wert. Beim Wachstum müssen beide Perioden dasselbe Konzept haben, sonst ist das Ergebnis „unzureichende Daten“.
+- **Aufeinanderfolge:** Die n Perioden enden an der jüngsten gemeldeten Periode und folgen lückenlos aufeinander. Zwischen Ende und nächstem Beginn liegen 1 bis 7 Tage, das deckt 52/53-Wochen-Jahre ab. Eine fehlende Periode wird nie übersprungen.
+- **Ergebnis:** „Ausgelöst“ nur, wenn alle n Perioden die Bedingung erfüllen. Erfüllt eine vorhandene Periode sie nicht, lautet das Ergebnis „nicht ausgelöst“. In allen übrigen Fällen lautet es „unzureichende Daten“, mit konkretem Grund.
+- **Fehlende Werte** werden nie zu 0.
+- **Keine Berechnung bei null oder negativer Basis:**
+  - Umsatz ≤ 0 ergibt keine Marge;
+  - ein Vorjahresumsatz ≤ 0 ergibt keine Wachstumsrate.
+- **Einheiten:** Margen stehen in %, Wachstum als relative Veränderung in %, und der Abstand zur Schwelle in Prozentpunkten. Die Beträge sind in Mio. der Berichtswährung angegeben; verschiedene Währungen werden nicht verrechnet.
+- **Freier Cashflow** = operativer Cashflow (`NetCashProvidedByUsedInOperatingActivities`) − Investitionen in Sachanlagen (`PaymentsToAcquirePropertyPlantAndEquipment`), beide aus derselben Periode. Fehlen die Investitionen, gibt es keinen Wert. Andere Investitionen, etwa in Software oder Leasing, sind nicht enthalten.
+- **Veraltet** richtet sich nach dem Bericht, nicht nach dem Abruf: Das jüngste Quartal endet mehr als 140 Tage vor dem Prüftag, bzw. das jüngste Geschäftsjahr mehr als 455 Tage. Dann wäre nach den üblichen Meldefristen bereits ein neuerer Bericht fällig.
+
+**Speicherung** (Feld `autoChecks` der These, wird nur ergänzt)
+- Jeder Klick wird als eigener Lauf gespeichert, gebunden an die Thesenversion und mit einer Kopie des Kriteriums.
+- Ein fehlgeschlagener Abruf wird ebenfalls gespeichert und angezeigt. Das letzte erfolgreiche Ergebnis bleibt mit seinem Alter sichtbar.
+- Ändert sich das Kriterium, wird das alte Ergebnis als „gilt für die frühere Fassung“ markiert.
+- Automatische Läufe verändern weder Versionen noch manuelle Prüfungen oder den Prüftermin.
+- Export und Import enthalten die Läufe. Ein Import mit zusätzlichen Läufen gilt als „erweitert“.
+
+**Geprüft**
+- 25 neue Tests (insgesamt 232, alle grün) für:
+  - Perioden, kumulierte Cashflows und Einzelquartale;
+  - fehlende Quartale, Grenzwerte, Prozent und Prozentpunkte;
+  - Berichtigungen, Basis null, fremdes Konzept, abweichendes Geschäftsjahr;
+  - veraltete Daten, Quellenausfall, Versionsbindung, Import und Export.
+- Typecheck und Produktions-Build erfolgreich.
+- Browser-Ablauf auf Smartphone (390 px) und Desktop:
+  - Abruf über die Route und Anzeige der Belege;
+  - ein anschließender fehlgeschlagener Abruf, bei dem das Alter des früheren Ergebnisses zu sehen ist;
+  - Speicherstand unverändert, kein horizontales Scrollen.
+- Dieser Ablauf lief **nur mit einem lokalen Mock und fiktiven Zahlen**; das ist kein Live-Ergebnis.
+
+**Offen**
+- **Echtdaten-Test ausstehend:** In der Entwicklungsumgebung ist `data.sec.gov` gesperrt. Auf dem Mac: Website starten (mit `SEC_EDGAR_USER_AGENT`), eine These mit Kriterien zu z. B. AAPL anlegen, dann „Jetzt prüfen“. Dabei die Werte gegen die verlinkten 10-Q/10-K abgleichen.
+- **Bekannte Grenzen:**
+  - Unternehmen ohne XBRL-Daten bei der SEC werden nicht geprüft, das betrifft die meisten DACH-Werte.
+  - Banken und Versicherer melden oft kein `OperatingIncomeLoss` und bekommen dann „unzureichende Daten“.
+  - Wechselt ein Unternehmen das Umsatzkonzept, ist der Vorjahresvergleich an dieser Stelle nicht möglich.
+  - Die Rohantwort der SEC kann mehrere MB groß sein; sie wird deshalb nur normalisiert im Prozess zwischengespeichert.
+

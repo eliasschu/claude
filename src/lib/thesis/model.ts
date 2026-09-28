@@ -9,6 +9,8 @@
  *  - Nichts hier ist manipulationssicher: Die Daten liegen im Browser und koennen dort veraendert werden.
  */
 
+import type { CriterionResult } from "./criteria-eval.ts";
+
 export const THESIS_FORMAT = "der-junge-kapitalist.thesen";
 export const THESIS_FORMAT_VERSION = 1;
 
@@ -99,6 +101,20 @@ export interface Thesis {
   reviews: ReviewEntry[];
   /** Nur bei Import als Kopie: Herkunft der These */
   importedFrom?: { originalId: string; at: string };
+  /** Automatische Pruefungen (nur anhaengen, nie aendern). Veraendern weder Versionen noch manuelle Pruefungen. */
+  autoChecks?: AutoCheckRun[];
+}
+
+/** Ein Klick auf „Jetzt prüfen“ - gebunden an die Thesenversion; Ergebnisse enthalten eine Kopie des Kriteriums. */
+export interface AutoCheckRun {
+  id: string;
+  /** Zeitpunkt der Pruefung */
+  at: string;
+  thesisVersion: number;
+  fetch:
+    | { ok: true; fetchedAt: string; stale: boolean; staleReason: string | null; sourceUrl: string | null; entityName: string; cik: string }
+    | { ok: false; error: string };
+  results: CriterionResult[];
 }
 
 export interface ThesisStore { formatVersion: number; theses: Thesis[] }
@@ -196,6 +212,38 @@ export function setLifecycle(t: Thesis, to: Lifecycle, reason: string, now: stri
   if (!reason.trim()) throw new ThesisError("Bitte einen Grund angeben.");
   return { ...t, lifecycle: to, lifecycleEvents: [...t.lifecycleEvents, { at: now, to, reason: reason.trim() }] };
 }
+
+/** Haengt einen automatischen Pruefdurchlauf an. Nur fuer die aktuelle Version; alles andere bleibt unveraendert. */
+export function addAutoCheck(t: Thesis, run: AutoCheckRun): Thesis {
+  const v = current(t);
+  if (run.thesisVersion !== v.version) throw new ThesisError("Die These wurde inzwischen geändert - bitte erneut prüfen.");
+  const known = new Set(v.content.criteria.map((k) => k.id));
+  if (run.results.some((r) => !known.has(r.criterionId))) throw new ThesisError("Prüfergebnis bezieht sich auf ein unbekanntes Kriterium.");
+  if ((t.autoChecks ?? []).some((r) => r.id === run.id)) throw new ThesisError("Dieser Prüflauf ist bereits gespeichert.");
+  return { ...t, autoChecks: [...(t.autoChecks ?? []), run] };
+}
+
+/**
+ * Juengstes Ergebnis je Kriterium aus erfolgreichen Abrufen, plus ein spaeterer fehlgeschlagener Abruf (falls vorhanden).
+ * `olderVersion`: Ergebnis stammt aus einer frueheren Thesenversion; `criterionChanged`: das Kriterium wurde seitdem geaendert.
+ */
+export function latestAutoResults(t: Thesis): Map<string, { run: AutoCheckRun; result: CriterionResult; olderVersion: boolean; criterionChanged: boolean; failedAfter: AutoCheckRun | null }> {
+  const out = new Map<string, { run: AutoCheckRun; result: CriterionResult; olderVersion: boolean; criterionChanged: boolean; failedAfter: AutoCheckRun | null }>();
+  const v = current(t);
+  const runs = t.autoChecks ?? [];
+  for (const k of v.content.criteria) {
+    const idx = runs.findLastIndex((r) => r.fetch.ok && r.results.some((x) => x.criterionId === k.id));
+    if (idx < 0) continue;
+    const run = runs[idx];
+    const result = run.results.find((x) => x.criterionId === k.id)!;
+    const failed = runs.slice(idx + 1).findLast((r) => !r.fetch.ok) ?? null;
+    out.set(k.id, { run, result, olderVersion: run.thesisVersion !== v.version, criterionChanged: stable(result.criterion) !== stable(k), failedAfter: failed });
+  }
+  return out;
+}
+
+/** Letzter Durchlauf (auch fehlgeschlagen), falls vorhanden. */
+export const lastAutoRun = (t: Thesis): AutoCheckRun | null => t.autoChecks?.at(-1) ?? null;
 
 /* ------------------------------------------------------------------ Pruefstatus (ohne automatische Pruefung) */
 
@@ -298,6 +346,16 @@ export function parseImport(text: string): { ok: true; theses: Thesis[] } | { ok
         errors.push(`${where}: eine Prüfung ist unvollständig.`);
       }
     }
+    if (t.autoChecks !== undefined) {
+      if (!Array.isArray(t.autoChecks)) errors.push(`${where}: automatische Prüfungen ungültig.`);
+      else for (const a of t.autoChecks as unknown[]) {
+        if (!isObj(a) || !isStr(a.id, 100) || !isTime(a.at) || !Number.isInteger(a.thesisVersion) || (a.thesisVersion as number) < 1
+          || (a.thesisVersion as number) > (t.versions as unknown[]).length || !isObj(a.fetch) || typeof a.fetch.ok !== "boolean" || !Array.isArray(a.results)
+          || (a.results as unknown[]).some((r) => !isObj(r) || !isStr(r.criterionId, 100) || !isStr(r.status, 40) || !isStr(r.sentence) || !isObj(r.criterion) || !Array.isArray(r.periods))) {
+          errors.push(`${where}: eine automatische Prüfung ist unvollständig.`);
+        }
+      }
+    }
   });
   return errors.length ? { ok: false, errors: errors.slice(0, 20) } : { ok: true, theses: raw.theses as Thesis[] };
 }
@@ -305,7 +363,8 @@ export function parseImport(text: string): { ok: true; theses: Thesis[] } | { ok
 export type ImportKind = "neu" | "identisch" | "erweitert" | "abweichend";
 export interface ImportItem { incoming: Thesis; existing: Thesis | null; kind: ImportKind }
 
-const history = (t: Thesis) => [...t.versions.map((v) => stable(v)), ...t.reviews.map((r) => stable(r)), ...t.lifecycleEvents.map((e) => stable(e))];
+const history = (t: Thesis) => [...t.versions.map((v) => stable(v)), ...t.reviews.map((r) => stable(r)), ...t.lifecycleEvents.map((e) => stable(e)),
+  ...(t.autoChecks ?? []).map((a) => stable(a))];
 
 /**
  * Einordnung je importierter These:

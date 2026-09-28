@@ -5,13 +5,14 @@
  *
  * - Nur in diesem Browser auf diesem Geraet; Loeschen der Browserdaten loescht die Thesen.
  * - Kein Konto, kein Zugriffsschutz, nicht manipulationssicher.
- * - Es wird nichts an einen Server, Datenanbieter oder KI-Dienst uebertragen.
+ * - Es wird nichts an einen Server, Datenanbieter oder KI-Dienst uebertragen. Fuer „Jetzt prüfen“ geht nur das
+ *   Boersenkuerzel an die eigene Route /api/kennzahlen (SEC-Zahlen), nie Thesentexte.
  * - Gespeichert wird im selben, gepruefte Format wie der Export - ein beschaedigter Speicher wird NICHT
  *   automatisch ueberschrieben, sondern gemeldet.
  */
 
 import { useSyncExternalStore } from "react";
-import { emptyStore, exportJson, parseImport, type ThesisStore } from "./model.ts";
+import { emptyStore, exportJson, parseImport, ThesisError, type Thesis, type ThesisStore } from "./model.ts";
 
 export const THESIS_STORAGE_KEY = "djk-thesen-v1";
 
@@ -53,6 +54,14 @@ export function useThesisStore(): StorageState {
 export function writeStore(store: ThesisStore) {
   window.localStorage.setItem(THESIS_STORAGE_KEY, exportJson(store, new Date().toISOString()));
   listeners.forEach((l) => l());
+}
+
+/** Aendert eine These auf Basis des AKTUELLEN Speicherstands (z. B. nach einem asynchronen Abruf). */
+export function updateThesis(id: string, fn: (t: Thesis) => Thesis) {
+  const s = read();
+  if (s.status !== "ok") throw new ThesisError("Der lokale Speicher ist nicht verfügbar - nichts gespeichert.");
+  if (!s.store.theses.some((t) => t.id === id)) throw new ThesisError("Die These ist in diesem Browser nicht mehr vorhanden.");
+  writeStore({ ...s.store, theses: s.store.theses.map((t) => (t.id === id ? fn(t) : t)) });
 }
 
 /** Rohinhalt eines beschaedigten Speichers - zum Sichern, bevor bewusst geloescht wird. */

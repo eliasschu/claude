@@ -8,6 +8,7 @@ import {
 import { Chip } from "@/components/ui/primitives";
 import { formatDate, formatDateTime } from "@/lib/finance/format";
 import { cn } from "@/lib/utils";
+import { AutoCheckBar, AutoResult } from "./auto-check";
 
 const input = "w-full rounded-[10px] border border-line bg-surface px-3 py-2 text-[14px] text-ink outline-none focus:border-accent";
 
@@ -18,7 +19,7 @@ export function StorageNotice({ compact = false }: { compact?: boolean }) {
       Deine Thesen liegen <strong className="text-ink">nur in diesem Browser</strong> auf diesem Gerät. Wer die Browserdaten löscht,
       einen anderen Browser nutzt oder im privaten Fenster arbeitet, sieht sie nicht oder verliert sie. Sichere sie deshalb regelmäßig
       über den Export unter „Meine Thesen“. Es gibt kein Konto und keinen Zugriffsschutz, und die Einträge sind nicht manipulationssicher.
-      Nichts davon wird an einen Server oder Dienst übertragen.
+      Deine Texte werden an keinen Server oder Dienst übertragen; für „Jetzt prüfen“ geht nur das Börsenkürzel an die SEC-Schnittstelle dieser Website.
     </p>
   );
 }
@@ -45,7 +46,7 @@ function Text({ title, value }: { title: string; value: string }) {
 
 /**
  * Aktueller Stand einer These. Bewusst KEIN Gesamturteil wie "These intakt": Manuelle Einschaetzungen,
- * faellige Pruefung und fehlende automatische Pruefung stehen getrennt nebeneinander.
+ * faellige Pruefung und automatische Kriterienpruefung stehen getrennt nebeneinander.
  */
 export function ThesisView({ t, today }: { t: Thesis; today: string }) {
   const v = current(t);
@@ -72,6 +73,7 @@ export function ThesisView({ t, today }: { t: Thesis; today: string }) {
 
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Messbare Widerlegungskriterien</p>
+        {c.criteria.length > 0 && t.lifecycle === "aktiv" ? <div className="mt-1"><AutoCheckBar t={t} /></div> : null}
         {c.criteria.length === 0 ? <p className="mt-1 text-[13px] text-muted">Keine festgelegt.</p> : (
           <ul className="mt-1 space-y-1.5">
             {c.criteria.map((k) => {
@@ -79,8 +81,8 @@ export function ThesisView({ t, today }: { t: Thesis; today: string }) {
               return (
                 <li key={k.id} className="rounded-[10px] border border-line px-3 py-2 text-[13px]">
                   <p className="font-semibold">{describeCriterion(k)}</p>
-                  <p className="mt-0.5 text-[11px] text-faint">Automatische Prüfung noch nicht verfügbar.</p>
-                  <p className="mt-0.5 text-[11px]">
+                  <AutoResult t={t} criterionId={k.id} />
+                  <p className="mt-1 text-[11px]">
                     {m ? <>Manuell bewertet am {formatDate(m.at)}: <strong>{ASSESSMENT_LABEL[m.assessment]}</strong></> : <span className="text-faint">Noch nicht manuell bewertet.</span>}
                   </p>
                 </li>

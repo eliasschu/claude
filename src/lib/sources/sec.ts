@@ -2,6 +2,7 @@ import { env, upstream } from "../core/env.ts";
 import { fetchSource, parseJson, parseText, SourceError } from "../core/http.ts";
 import { fail, ok, type DataMeta, type Result } from "../core/meta.ts";
 import { filingUrls, normalizeSubmissions, normalizeTickerIndex, padCik, parseForm4, type ConceptFact, type Form4, type SecCompany, type SecListing } from "./parsers/sec.ts";
+import { normalizeCompanyFacts, type CompanyFactsJson, type NormalizedFacts } from "../finance/sec-facts.ts";
 import { findInfoTableFile, parse13FInfoTable, parseEdgarIndexJson, type ThirteenFHolding } from "./parsers/sec-13f.ts";
 
 function headers(): Record<string, string> {
@@ -66,6 +67,33 @@ export async function getConcept(cik: number, taxonomy: string, tag: string): Pr
   } catch (error) {
     if (error instanceof SourceError && error.reason === "not_found") return null;
     throw error;
+  }
+}
+
+let factsCache = new Map<number, { at: number; value: NormalizedFacts; fetchedAt: string }>();
+const FACTS_TTL_MS = 3600 * 1000;
+
+/**
+ * Alle XBRL-Werte eines Emittenten (Company Facts), sofort normalisiert. Die Rohantwort ist oft mehrere MB gross und
+ * wird deshalb nicht im Next-Datencache abgelegt, sondern nur die normalisierte Fassung hier im Prozess (1 Stunde).
+ * Faellt die SEC aus, liefert fetchSource hoechstens 24 Stunden lang den letzten erfolgreichen Abruf (stale = true).
+ */
+export async function getCompanyFacts(cik: number): Promise<Result<NormalizedFacts>> {
+  const hit = factsCache.get(cik);
+  const url = `https://data.sec.gov/api/xbrl/companyfacts/CIK${padCik(cik)}.json`;
+  if (hit && Date.now() - hit.at < FACTS_TTL_MS) return ok(hit.value, secMeta(hit.fetchedAt, null, false, undefined, url));
+  try {
+    const res = await fetchSource({
+      ...COMMON, url: upstream(url), headers: headers(), revalidate: 3600, noStore: true, timeoutMs: 20_000, retries: 1,
+      parse: async (r) => normalizeCompanyFacts((await r.json()) as CompanyFactsJson),
+    });
+    if (!res.stale) {
+      if (factsCache.size > 200) factsCache = new Map();
+      factsCache.set(cik, { at: Date.now(), value: res.value, fetchedAt: res.fetchedAt });
+    }
+    return ok(res.value, secMeta(res.fetchedAt, null, res.stale, res.staleReason, url));
+  } catch (error) {
+    return secFailure(error);
   }
 }
 
