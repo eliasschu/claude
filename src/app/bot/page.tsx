@@ -24,7 +24,7 @@ const CAPABILITIES: { title: string; stage: Stage; text: string }[] = [
   {
     title: "Insidermeldungen einordnen",
     stage: "live",
-    text: `Liest SEC-Form-4-Meldungen für eine Beobachtungsliste von ${STOCK_MOVER_UNIVERSE.length} US-Aktien (${STOCK_MOVER_UNIVERSE.join(", ")}). Trennt Käufe und Verkäufe am offenen Markt von Zuteilungen, Ausübungen und Steuereinbehalten, erkennt Handelspläne (Rule 10b5-1) und Käufe mehrerer Insider.`,
+    text: `Liest SEC-Form-4-Meldungen, speichert jede Erkennung unveränderlich im Archiv des Bots (solange er läuft) und zeigt sie hier. Beobachtungsliste der Website: ${STOCK_MOVER_UNIVERSE.length} US-Aktien (${STOCK_MOVER_UNIVERSE.join(", ")}). Trennt Käufe und Verkäufe am offenen Markt von Zuteilungen, Ausübungen und Steuereinbehalten, erkennt Handelspläne (Rule 10b5-1) und Käufe mehrerer Insider.`,
   },
   {
     title: "Marktsignale (Krypto und US-Aktien)",
@@ -129,6 +129,23 @@ export default function BotPage() {
             </ol>
           </CardBody>
         </Card>
+      </section>
+
+      <section aria-labelledby="wo">
+        <h2 id="wo" className="mb-3 text-[18px] font-bold tracking-[-0.01em]">Wo der Bot läuft</h2>
+        <div className="space-y-2 text-[13px] leading-relaxed text-muted">
+          <p>
+            Der Bot läuft derzeit auf einem privaten Rechner, nicht auf einem Server. Er ruft alle 30 Minuten neue Meldungen ab und
+            speichert jede Erkennung dauerhaft. <strong className="text-ink">Das passiert nur, solange der Rechner eingeschaltet, wach
+            und online ist.</strong> Im Ruhezustand gibt es keine Erkennungen. Was in dieser Zeit veröffentlicht wurde, wird beim
+            nächsten Abruf nachgeholt und trägt dann den späteren, tatsächlichen Erkennungszeitpunkt.
+          </p>
+          <p>
+            Über den Meldungen steht deshalb immer der Zustand der Verbindung und der letzte erfolgreiche Abruf. Ist der Bot nicht
+            erreichbar, rechnet die Website dieselben Regeln live nach. Diese Karten tragen das Etikett „Live-Auswertung · nicht
+            archiviert“ und gelten nicht als Erkennung des Bots.
+          </p>
+        </div>
       </section>
 
       <section aria-labelledby="nicht">

@@ -16,6 +16,8 @@ Python-Dienst für Datenpipeline, Feature Engine, Marktregime, Strategien, Risk 
 
 Alle Dienste migrieren beim Start. Eine Advisory-Sperre verhindert, dass zwei Dienste gleichzeitig migrieren.
 
+**Lokal auf dem Mac, ohne Server:** `./bot-lokal.sh einrichten && ./bot-lokal.sh start` (siehe `docs/lokal-mac.md`). Erkennungen gibt es nur, solange der Rechner wach und online ist.
+
 ```bash
 cp services/quant/.env.example services/quant/.env   # BOT_API_TOKEN setzen
 docker compose up -d                                   # postgres, redis, api, bot-worker, scheduler

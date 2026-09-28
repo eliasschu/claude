@@ -14,3 +14,6 @@ coverage/
 services/quant/.env
 __pycache__/
 .pytest_cache/
+
+# lokale Datenbank-Sicherungen (./bot-lokal.sh sichern)
+backups-lokal/

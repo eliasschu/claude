@@ -9,7 +9,7 @@
 # nur im internen Netz erreichbar. Secrets nur aus services/quant/.env (nie committen).
 
 x-quant: &quant
-  build: ./services/quant
+  build: { context: ./services/quant, target: base }   # ohne target baute Docker die Test-Stufe mit Entwicklerpaketen
   env_file: ./services/quant/.env
   depends_on:
     postgres: { condition: service_healthy }

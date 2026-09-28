@@ -159,3 +159,54 @@ def test_api_lists_and_returns_messages(db, monkeypatch):
         assert c.get("/messages/00000000-0000-0000-0000-000000000000", headers=h).status_code == 404
     finally:
         api.app.dependency_overrides.clear()
+
+
+def test_run_log_and_status_endpoint(db, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    import quant.api as api
+    import quant.scheduler as sched
+    from quant.heartbeat import beat
+
+    settings = SimpleNamespace(sec_user_agent="Test test@example.org", equity_symbols=("TST",), sec_13f_managers=())
+    real_now = datetime.now(timezone.utc)
+    shifted = [(a, (real_now - timedelta(hours=8)).date().isoformat(), r, (real_now - timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z"), fo, d)
+               for a, _f, r, _acc, fo, d in FILINGS[:3]]
+
+    class FakeClient:
+        def __init__(self, *_a):
+            self.inner = client(shifted)
+
+        def ticker_map(self):
+            return {"TST": "42"}
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    monkeypatch.setattr("quant.sec.client.SecClient", FakeClient)
+    out = sched.run_insider_task(db, settings)
+    assert out["ok"] and out["new_messages"] >= 1
+
+    def broken(*_a):
+        from quant.providers.base import ProviderError
+        raise ProviderError("sec", "unavailable", "offline")
+    monkeypatch.setattr("quant.sec.client.SecClient", broken)
+    out2 = sched.run_insider_task(db, settings)
+    assert not out2["ok"] and out2["new_messages"] == 0
+    runs = db.execute("SELECT ok, error_summary FROM ingest_runs ORDER BY finished_at").fetchall()
+    assert [r["ok"] for r in runs] == [True, False] and "Internetverbindung" in runs[1]["error_summary"]
+    beat(db, "scheduler", now=real_now, started_at=real_now)
+
+    monkeypatch.setenv("BOT_API_TOKEN", "t")
+    db.autocommit = True
+    api.app.dependency_overrides[api.db] = lambda: db
+    try:
+        body = TestClient(api.app).get("/messages/status", headers={"Authorization": "Bearer t"}).json()["data"]
+        assert body["interval_minutes"] == 30
+        assert body["last_success_at"] and body["last_attempt_ok"] is False
+        assert body["last_attempt_at"] > body["last_success_at"]
+        assert body["archive"]["messages"] >= 1 and body["scheduler_last_beat"]
+    finally:
+        api.app.dependency_overrides.clear()

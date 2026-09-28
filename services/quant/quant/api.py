@@ -282,6 +282,29 @@ def list_messages(conn=Depends(db), limit: int = Query(50, ge=1, le=500), ticker
     return envelope(rows)
 
 
+@app.get("/messages/status", dependencies=[Auth])
+def messages_status(conn=Depends(db)) -> dict:
+    """Letzter erfolgreicher und letzter versuchter Abruf, Lebenszeichen des Schedulers, Umfang des Archivs."""
+    from .scheduler import SEC_INTERVAL
+
+    last_ok = conn.execute("SELECT finished_at, details FROM ingest_runs WHERE task='sec_insider' AND ok ORDER BY finished_at DESC LIMIT 1").fetchone()
+    last_try = conn.execute("SELECT finished_at, ok, error_summary FROM ingest_runs WHERE task='sec_insider' ORDER BY finished_at DESC LIMIT 1").fetchone()
+    beat_row = conn.execute("SELECT max(last_beat) AS last_beat FROM service_heartbeats WHERE service='scheduler'").fetchone()
+    archive = one(conn.execute("""SELECT count(*) AS messages, min(detected_at) AS first_detected, max(detected_at) AS last_detected
+                                  FROM bot_messages WHERE mode='live'"""))
+    return envelope({
+        "interval_minutes": int(SEC_INTERVAL.total_seconds() // 60),
+        "last_success_at": last_ok["finished_at"] if last_ok else None,
+        "last_success_details": last_ok["details"] if last_ok else None,
+        "last_attempt_at": last_try["finished_at"] if last_try else None,
+        "last_attempt_ok": last_try["ok"] if last_try else None,
+        "last_attempt_error": last_try["error_summary"] if last_try else None,
+        "scheduler_last_beat": beat_row["last_beat"] if beat_row else None,
+        "archive": archive,
+        "server_time": datetime.now(timezone.utc),
+    })
+
+
 @app.get("/messages/{message_id}", dependencies=[Auth])
 def get_message(message_id: uuid.UUID, conn=Depends(db)) -> dict:
     row = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages WHERE message_id = %s", (message_id,)).fetchone()

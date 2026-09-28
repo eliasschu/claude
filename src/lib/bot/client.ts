@@ -64,7 +64,22 @@ export interface BotStatus {
   last_kill_switch: { created_at: string; message: string } | null;
 }
 
-export type BotResult<T> = { ok: true; value: Envelope<T> } | { ok: false; message: string };
+/** not_configured: keine Bot-Adresse gesetzt; unreachable: keine Antwort (Rechner aus/schlafend, Docker gestoppt); http: Fehlerstatus. */
+export type BotFailure = "not_configured" | "unreachable" | "http";
+
+export type BotResult<T> = { ok: true; value: Envelope<T> } | { ok: false; message: string; reason: BotFailure };
+
+export interface ArchiveStatus {
+  interval_minutes: number;
+  last_success_at: string | null;
+  last_success_details: { issuers: number; new_messages: number } | null;
+  last_attempt_at: string | null;
+  last_attempt_ok: boolean | null;
+  last_attempt_error: string | null;
+  scheduler_last_beat: string | null;
+  archive: { messages: number; first_detected: string | null; last_detected: string | null };
+  server_time: string;
+}
 
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -72,17 +87,17 @@ export async function botGet<T>(path: string, fetcher: Fetcher = fetch): Promise
   assertServer("Bot-API-Client");
   const base = env.botApiUrl();
   const token = env.botApiToken();
-  if (!base || !token) return { ok: false, message: "Bot-API ist nicht eingerichtet (BOT_API_URL, BOT_API_TOKEN)." };
+  if (!base || !token) return { ok: false, reason: "not_configured", message: "Bot-API ist nicht eingerichtet (BOT_API_URL, BOT_API_TOKEN)." };
   try {
     const response = await fetcher(`${base.replace(/\/$/, "")}${path}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) return { ok: false, message: `Bot-API antwortete mit ${response.status}` };
+    if (!response.ok) return { ok: false, reason: "http", message: `Bot-API antwortete mit ${response.status}` };
     return { ok: true, value: (await response.json()) as Envelope<T> };
   } catch {
-    return { ok: false, message: "Bot-API nicht erreichbar" };
+    return { ok: false, reason: "unreachable", message: "Bot-API nicht erreichbar" };
   }
 }
 
@@ -102,5 +117,6 @@ export const bot = {
     if (params.ticker) q.set("ticker", params.ticker);
     return botGet<ArchivedMessage[]>(`/messages?${q}`, f);
   },
+  archiveStatus: (f?: Fetcher) => botGet<ArchiveStatus>("/messages/status", f),
   message: (id: string, f?: Fetcher) => botGet<ArchivedMessage>(`/messages/${encodeURIComponent(id)}`, f),
 };

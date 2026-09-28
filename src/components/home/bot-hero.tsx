@@ -1,27 +1,5 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { bot } from "@/lib/bot/client";
-import { formatDateTime } from "@/lib/finance/format";
-
-/** Betriebszustand der internen Signal-Engine - nur was die Bot-API tatsaechlich meldet. */
-export async function BotStatusLine() {
-  const status = await bot.status();
-  if (!status.ok) {
-    return (
-      <p className="text-[12px] text-faint">
-        Öffentlich läuft derzeit die Erkennung aus Insidermeldungen. Die Marktsignal-Engine ist gebaut und getestet, aber noch
-        nicht im Dauerbetrieb.
-      </p>
-    );
-  }
-  const s = status.value.data;
-  return (
-    <p className="text-[12px] text-faint">
-      Marktsignal-Engine: {s.online ? "läuft intern im Paper-Betrieb" : "derzeit nicht aktiv"}
-      {s.last_data_update ? ` · letzte Daten ${formatDateTime(s.last_data_update)}` : ""}. Ihre Signale sind noch nicht öffentlich.
-    </p>
-  );
-}
 
 export function BotHeroIntro({ children }: { children?: React.ReactNode }) {
   return (

@@ -133,3 +133,7 @@ Stand: 28.09.2026. Aktienanalysen, Insiderdaten, Prognosemärkte und Nachrichten
 - Ein Cluster, der später um einen dritten Insider wächst, bekommt keine neue Meldung. Er bleibt die Meldung vom ersten Erkennen.
 - Die Beobachtungsliste des Bots (`EQUITY_SYMBOLS`, Standard: SPY, QQQ, AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD) weicht leicht von der Website-Liste ab (dort mit JPM statt AMD). Das ist beim Deploy per Umgebungsvariable wählbar.
 - Detailseite je Meldung mit späterem Kursverlauf folgt in Etappe 3.
+
+## Nachtrag: kein Server
+
+Für den Start wird kein Server gemietet. Der Bot läuft lokal auf dem Mac (`./bot-lokal.sh`, `docs/lokal-mac.md`). GitHub Actions ist als Option geprüft, aber nicht eingerichtet (`05-betrieb-ohne-server.md`). Die Hetzner-Anleitung bleibt für später erhalten.

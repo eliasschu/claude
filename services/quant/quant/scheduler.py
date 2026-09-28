@@ -32,18 +32,30 @@ def equity_due(conn, now: datetime) -> bool:
     return row is None
 
 
+# Verstaendliche Ursache fuer die Website ("letzter Abruf fehlgeschlagen: ...").
+SEC_ERROR_TEXT = {
+    "not_configured": "SEC lehnt den Abruf ab (SEC_EDGAR_USER_AGENT mit Name und E-Mail prüfen)",
+    "unavailable": "SEC nicht erreichbar (Internetverbindung prüfen)",
+    "rate_limited": "SEC drosselt die Abrufe vorübergehend",
+}
+
+# Wie oft der Scheduler SEC-Insidermeldungen abruft (nur solange der Rechner wach ist).
+SEC_INTERVAL = timedelta(minutes=30)
+
+
 def run_sec(conn, settings, now: datetime) -> dict:
     """Form 4 + 13D/G fuer das Aktienuniversum, 13F fuer die Manager-Liste. Fehler je Firma isoliert."""
     from .providers.base import ProviderError
     from .sec.client import SecClient
     from .sec.ingest import SecIngestor
 
-    totals = {"issuers": 0, "managers": 0, "errors": 0}
+    totals: dict = {"issuers": 0, "managers": 0, "errors": 0, "ok": False, "error": None}
     try:
         client = SecClient(settings.sec_user_agent)
         tickers = client.ticker_map()
     except ProviderError as exc:
         log.warning("SEC nicht verfuegbar", extra={"event": "sec_unavailable", "error_type": exc.reason})
+        totals["error"] = SEC_ERROR_TEXT.get(exc.reason, f"SEC nicht erreichbar ({exc.reason})")
         return totals
     ing = SecIngestor(conn, client, lambda: datetime.now(timezone.utc))
     since = (now - timedelta(days=120)).date()
@@ -64,8 +76,35 @@ def run_sec(conn, settings, now: datetime) -> dict:
         except ProviderError:
             totals["errors"] += 1
             conn.rollback()
-    log.info("SEC-Abgleich", extra={"event": "sec_ingest", **totals})
+    # Erfolgreich = SEC erreichbar und mindestens ein Emittent ohne Fehler abgeglichen.
+    totals["ok"] = totals["issuers"] > 0
+    if not totals["ok"]:
+        totals["error"] = "Kein Emittent erfolgreich abgeglichen"
+    log.info("SEC-Abgleich", extra={"event": "sec_ingest", **{k: v for k, v in totals.items() if k != "error"}})
     return totals
+
+
+def run_insider_task(conn, settings) -> dict:
+    """SEC-Abruf + Erkennung als ein Durchlauf; das Ergebnis wird unveraenderlich protokolliert."""
+    import uuid
+
+    from psycopg.types.json import Jsonb
+
+    from .messages import detect_insider_messages
+
+    started = datetime.now(timezone.utc)
+    totals = run_sec(conn, settings, started)
+    new = 0
+    if totals["ok"]:
+        new = detect_insider_messages(conn, datetime.now(timezone.utc))  # Bot-Uhr NACH dem Abruf: nie frueher als received_at
+    finished = datetime.now(timezone.utc)
+    conn.execute(
+        "INSERT INTO ingest_runs (run_id, task, started_at, finished_at, ok, details, error_summary) VALUES (%s,'sec_insider',%s,%s,%s,%s,%s)",
+        (uuid.uuid4(), started, finished, totals["ok"],
+         Jsonb({"issuers": totals["issuers"], "managers": totals["managers"], "errors": totals["errors"], "new_messages": new}),
+         totals["error"]))
+    conn.commit()
+    return {**totals, "new_messages": new}
 
 
 MACRO_SERIES = ("CPIAUCSL", "CPILFESL", "PCEPILFE", "PAYEMS", "UNRATE", "GDPC1", "INDPRO", "FEDFUNDS", "DGS10", "DGS2",
@@ -113,7 +152,6 @@ def main() -> None:
     import psycopg
 
     from .logs import configure_logging
-    from .messages import detect_insider_messages
     from .worker import backoff_delay
 
     configure_logging("scheduler")
@@ -147,9 +185,8 @@ def main() -> None:
             if now - last_macro >= timedelta(hours=6):
                 run_macro_and_cot(conn, _settings, now)
                 last_macro = now
-            if now - last_sec >= timedelta(minutes=30):
-                run_sec(conn, _settings, now)
-                detect_insider_messages(conn, datetime.now(timezone.utc))  # Bot-Uhr NACH dem Abruf: nie frueher als received_at
+            if now - last_sec >= SEC_INTERVAL:
+                run_insider_task(conn, _settings)
                 last_sec = now
             if now - last_outcomes >= timedelta(minutes=5):
                 bench = {"equity": resolve(conn, "ticker", "SPY", "US"), "crypto": resolve(conn, "exchange_symbol", "BTCUSDT", "binance")}

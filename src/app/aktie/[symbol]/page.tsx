@@ -12,8 +12,11 @@ import { FairValueCard } from "@/components/stock/fair-value-card";
 import { ScorecardCard } from "@/components/stock/scorecard-card";
 import { formatNumber, formatPrice } from "@/lib/finance/format";
 import { SmartSearch } from "@/components/layout/smart-search";
+import { StockUnavailable } from "@/components/stock/stock-unavailable";
 
 export const dynamicParams = true;
+// Spaetestens alle 15 Minuten neu erzeugen - auch eine beim Build ausgefallene Quelle bleibt so nicht dauerhaft im Cache.
+export const revalidate = 900;
 
 type Params = { params: Promise<{ symbol: string }> };
 
@@ -37,9 +40,10 @@ export default async function StockPage({ params }: Params) {
   const { symbol } = await params;
   const overview = await getStockOverview(symbol.toUpperCase());
   if (!overview.ok) {
-    // Nur ein unbekannter Ticker ist "nicht gefunden"; ein Quellenausfall ist ein Fehler und wird so benannt.
+    // Nur ein unbekannter Ticker ist "nicht gefunden". Ein Quellenausfall wird als solcher angezeigt - ohne Wurf,
+    // damit auch ein Build bei ausgefallener Quelle durchlaeuft.
     if (overview.reason === "not_found") notFound();
-    throw new Error(`Unternehmensdaten nicht verfügbar: ${overview.message}`);
+    return <StockUnavailable detail={overview.message} />;
   }
   const { listing, company, model, scorecard, prices, filings, factsMeta } = overview.data;
 

@@ -3,10 +3,9 @@ import { MarketRail } from "@/components/market/market-rail";
 import { DealsOfWeek } from "@/components/home/deals-of-week";
 import { Termine } from "@/components/home/termine";
 import { GrosseFischeTeaser } from "@/components/home/grosse-fische-teaser";
-import { BotHeroIntro, BotStatusLine } from "@/components/home/bot-hero";
+import { BotHeroIntro } from "@/components/home/bot-hero";
 import { BotFeed, BotFeedSkeleton } from "@/components/home/bot-feed";
 import { MarketRailSkeleton, ListSkeleton } from "@/components/home/skeletons";
-import { Skeleton } from "@/components/ui/primitives";
 
 /**
  * Startseite: zuerst der Bot (Nutzen, echte Beispielmeldung, aktuelle
@@ -17,11 +16,7 @@ import { Skeleton } from "@/components/ui/primitives";
 export default function HomePage() {
   return (
     <div className="space-y-9">
-      <BotHeroIntro>
-        <Suspense fallback={<Skeleton className="h-4 w-72" />}>
-          <BotStatusLine />
-        </Suspense>
-      </BotHeroIntro>
+      <BotHeroIntro />
 
       <Suspense fallback={<BotFeedSkeleton />}>
         <BotFeed />

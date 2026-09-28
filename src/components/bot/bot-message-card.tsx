@@ -33,6 +33,9 @@ export function BotMessageCard({ message: m, variant = "compact", headingLevel =
         <Chip tone={KIND_TONE[m.kind]}>{MESSAGE_KIND_LABEL[m.kind]}</Chip>
         <Link href={`/aktie/${m.ticker}`} className="num text-[12px] font-bold hover:underline">{m.ticker}</Link>
         <span className="truncate text-[12px] text-faint">{m.issuerName}</span>
+        {m.origin === "live" ? (
+          <Chip tone="neutral" className="ml-auto" title="Von der Website live berechnet, nicht im Archiv des Bots gespeichert">Live-Auswertung · nicht archiviert</Chip>
+        ) : null}
       </div>
 
       <Heading className={cn("mt-2.5 font-bold leading-snug tracking-[-0.01em]", full ? "text-[19px] sm:text-[22px]" : "text-[15px]")}>
@@ -61,7 +64,7 @@ export function BotMessageCard({ message: m, variant = "compact", headingLevel =
         </div>
         <div>
           <dt className="text-faint" title={m.origin === "archiv" ? "Erster Erkennungszeitpunkt, im Archiv unveränderlich gespeichert" : "Zeitpunkt des Datenabrufs, bei dem die Meldung vorlag"}>
-            {m.origin === "archiv" ? "Vom Bot erkannt" : "Abgerufen"}
+            {m.origin === "archiv" ? "Vom Bot erkannt" : "Von der Website abgerufen"}
           </dt>
           <dd className="num mt-0.5 font-semibold">{m.detectedAt ? formatDateTime(m.detectedAt) : "nicht belegt"}</dd>
         </div>
