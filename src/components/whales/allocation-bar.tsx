@@ -27,7 +27,7 @@ export function AllocationBar({ slices, totalUsd }: { slices: AllocationSlice[];
           const pct = (s.valueUsd / totalUsd) * 100;
           return (
             <span
-              key={s.label}
+              key={`${s.label}-${i}`}
               className={`h-full ${i < 5 ? SLOT_CLASSES[i] : "bg-line-strong"} ${i > 0 ? "ml-[2px]" : ""}`}
               style={{ width: `${pct}%` }}
               title={`${s.label}: ${pct.toFixed(1)} % (${formatCompact(s.valueUsd, "USD")})`}
@@ -40,7 +40,7 @@ export function AllocationBar({ slices, totalUsd }: { slices: AllocationSlice[];
         {segments.map((s, i) => {
           const pct = (s.valueUsd / totalUsd) * 100;
           return (
-            <li key={s.label} className="flex items-center gap-1.5 text-[11px]">
+            <li key={`${s.label}-${i}`} className="flex items-center gap-1.5 text-[11px]">
               <span className={`h-2.5 w-2.5 shrink-0 rounded-[2px] ${i < 5 ? SLOT_CLASSES[i] : "bg-line-strong"}`} aria-hidden />
               <span className="min-w-0 flex-1 truncate">{s.label}</span>
               <span className="num shrink-0 font-semibold">{pct.toFixed(0)} %</span>

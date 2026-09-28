@@ -61,6 +61,8 @@ export function parse13FInfoTable(xmlText: string, filingDate: string): Thirteen
     const cusip = (valueOf(child(entry, "cusip")) ?? "").trim();
     const reportedValue = num(valueOf(child(entry, "value")));
     if (!issuer || !cusip || reportedValue === null) continue;
+    // Put-/Call-Zeilen sind Optionen, kein Aktienbestand - sie wuerden die Position verfaelschen
+    if ((valueOf(child(entry, "putCall")) ?? "").trim()) continue;
     const amt = child(entry, "shrsOrPrnAmt");
     holdings.push({
       issuerName: issuer,
@@ -71,7 +73,24 @@ export function parse13FInfoTable(xmlText: string, filingDate: string): Thirteen
       investmentDiscretion: valueOf(child(entry, "investmentDiscretion")),
     });
   }
-  return holdings;
+  return mergeByCusip(holdings);
+}
+
+/**
+ * Eine 13F-Tabelle fuehrt dieselbe Aktie oft in mehreren Zeilen (je Verwalter/Unter-Manager bzw. Stimmrechtsart).
+ * Fuer die Anzeige zaehlt die Summe je CUSIP und Mengenart (Aktien vs. Nennwert); Reihenfolge der ersten Nennung bleibt.
+ */
+export function mergeByCusip(rows: ThirteenFHolding[]): ThirteenFHolding[] {
+  const merged = new Map<string, ThirteenFHolding>();
+  for (const h of rows) {
+    const key = `${h.cusip}|${h.shareType ?? ""}`;
+    const prev = merged.get(key);
+    if (!prev) { merged.set(key, { ...h }); continue; }
+    prev.valueUsd += h.valueUsd;
+    prev.shares = prev.shares !== null && h.shares !== null ? prev.shares + h.shares : prev.shares ?? h.shares;
+    if (prev.investmentDiscretion !== h.investmentDiscretion) prev.investmentDiscretion = "gemischt";
+  }
+  return [...merged.values()];
 }
 
 export interface EdgarIndexItem { name: string; type: string | null }

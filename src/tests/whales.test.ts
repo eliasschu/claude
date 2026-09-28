@@ -66,3 +66,14 @@ describe("13F-Informationstabelle", () => {
     assert.equal(findInfoTableFile(items, "primary_doc.xml"), null);
   });
 });
+
+test("13F: mehrfache Zeilen je CUSIP werden addiert, Put/Call-Optionen nicht als Bestand gezählt", () => {
+  const row = (shares: number, value: number, extra = "") => `<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass>
+    <cusip>037833100</cusip><value>${value}</value><shrsOrPrnAmt><sshPrnamt>${shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>${extra}
+    <investmentDiscretion>DFND</investmentDiscretion></infoTable>`;
+  const xml = `<informationTable>${row(100, 20000)}${row(50, 10000)}${row(10, 2000, "<putCall>Put</putCall>")}</informationTable>`;
+  const holdings = parse13FInfoTable(xml, "2026-08-14");
+  assert.equal(holdings.length, 1, "eine Zeile je CUSIP - keine doppelten Schlüssel in der Anzeige");
+  assert.equal(holdings[0].shares, 150);
+  assert.equal(holdings[0].valueUsd, 30000);
+});

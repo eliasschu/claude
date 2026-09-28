@@ -43,6 +43,11 @@ interface FetchOptions<T> {
   /** Mindestabstand zwischen zwei Abrufen derselben Quelle (Abruflimits). */
   minIntervalMs?: number;
   noStore?: boolean;
+  /**
+   * false = nicht im Next-Datencache ablegen (dort sind hoechstens 2 MB je Antwort erlaubt, z. B. SEC-Stammdaten
+   * grosser Konzerne sind groesser), aber weiterhin im Prozessspeicher fuer `revalidate` Sekunden wiederverwenden.
+   */
+  dataCache?: boolean;
 }
 
 const lastGood = new Map<string, { value: unknown; fetchedAt: string; storedAt: number }>();
@@ -69,7 +74,7 @@ function retryAfterMs(response: Response): number | null {
 export async function fetchSource<T>(options: FetchOptions<T>): Promise<FetchedValue<T>> {
   const {
     sourceId, url, headers, revalidate, timeoutMs = 10_000, retries = 2,
-    maxStaleMs = 24 * 3600 * 1000, parse, minIntervalMs = 0, noStore = false,
+    maxStaleMs = 24 * 3600 * 1000, parse, minIntervalMs = 0, noStore = false, dataCache = true,
   } = options;
 
   let lastError: SourceError | null = null;
@@ -92,7 +97,7 @@ export async function fetchSource<T>(options: FetchOptions<T>): Promise<FetchedV
         headers: { Accept: "application/json, text/xml, application/xml, text/csv, */*", ...headers },
         signal: controller.signal,
       };
-      if (noStore) init.cache = "no-store";
+      if (noStore || !dataCache) init.cache = "no-store";
       else init.next = { revalidate };
 
       const response = await fetch(url, init);

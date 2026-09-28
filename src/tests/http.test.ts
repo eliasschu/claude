@@ -23,6 +23,17 @@ function stub(responses: (() => Promise<Response>)[]) {
 }
 
 describe("Abrufschicht", () => {
+  test("dataCache: false umgeht den Next-Datencache (2-MB-Grenze), nutzt aber den Prozessspeicher", async () => {
+    const inits: RequestInit[] = [];
+    globalThis.fetch = (async (_u: string, init: RequestInit) => { inits.push(init); return json({ big: true }); }) as unknown as typeof fetch;
+    const opts = { sourceId: "sec" as const, url: "https://x/gross", revalidate: 900, dataCache: false, parse: parseJson };
+    await fetchSource(opts);
+    await fetchSource(opts);
+    assert.equal(inits.length, 1, "zweiter Aufruf aus dem Prozessspeicher");
+    assert.equal(inits[0].cache, "no-store");
+    assert.equal((inits[0] as { next?: unknown }).next, undefined);
+  });
+
   test("wiederholt bei 503 und liefert dann das Ergebnis", async () => {
     const calls = stub([async () => json({}, 503), async () => json({ a: 1 }, 200, { date: "Tue, 22 Sep 2026 10:00:00 GMT" })]);
     const r = await fetchSource({ sourceId: "ecb", url: "https://x/1", revalidate: 60, parse: parseJson, retries: 1 });

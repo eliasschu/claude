@@ -49,7 +49,8 @@ export async function getTickerIndex(): Promise<Result<{ list: SecListing[]; byT
 
 export async function getCompany(cik: number): Promise<Result<SecCompany>> {
   try {
-    const res = await fetchSource({ ...COMMON, url: upstream(`https://data.sec.gov/submissions/CIK${padCik(cik)}.json`), headers: headers(), revalidate: 900, parse: parseJson });
+    // Stammdaten grosser Konzerne sind mehrere MB gross - nur im Prozessspeicher, nicht im Next-Datencache (2-MB-Grenze)
+    const res = await fetchSource({ ...COMMON, url: upstream(`https://data.sec.gov/submissions/CIK${padCik(cik)}.json`), headers: headers(), revalidate: 900, dataCache: false, parse: parseJson });
     const company = normalizeSubmissions(res.value);
     if (!company) return fail("sec", "invalid", "Stammdaten unvollständig");
     return ok(company, secMeta(res.fetchedAt, company.filings[0]?.filingDate ?? null, res.stale, res.staleReason,
