@@ -58,3 +58,14 @@ describe("Archivfilter", () => {
     assert.equal(archiveHref({ period: "alle" }), "/meldungen");
   });
 });
+
+describe("Handelsplan in archivierten Meldungen", () => {
+  test("vier Zustände, ältere Speicherung ohne Zustand gilt als nicht sicher erfasst", async () => {
+    const { planStatusOf, PLAN_LABEL } = await import("../lib/services/bot-feed.ts");
+    assert.equal(planStatusOf({ plan_10b5_1: false, plan_status: "unknown" }), "unknown");
+    assert.equal(planStatusOf({ plan_10b5_1: false, plan_status: "denied" }), "denied");
+    assert.equal(planStatusOf({ plan_10b5_1: true }), "confirmed");
+    assert.equal(planStatusOf({ plan_10b5_1: false }), "legacy_uncertain", "altes false ist kein belegtes Nein");
+    assert.match(PLAN_LABEL.legacy_uncertain, /nicht sicher/);
+  });
+});

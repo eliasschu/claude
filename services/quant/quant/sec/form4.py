@@ -34,6 +34,8 @@ CODE_LABELS = {
 
 _PATTERNS = {
     "plan_10b5_1": re.compile(r"10b5-?1", re.I),
+    # Ausdruecklich KEIN Plan ("not pursuant to a Rule 10b5-1 trading plan") - darf nicht als Plan gelesen werden
+    "no_plan_10b5_1": re.compile(r"\bnot\s+(?:made\s+|effected\s+|entered\s+into\s+)?(?:pursuant\s+to|under)\s+(?:a\s+)?(?:rule\s+)?10b5-?1", re.I),
     "sell_to_cover_tax": re.compile(r"(sell[- ]to[- ]cover|(satisfy|cover|pay)\w*\s.{0,60}tax|tax\s+withholding|withholding\s+tax)", re.I),
     "vesting": re.compile(r"\bvest(ed|ing)?\b|restricted stock unit|\bRSU", re.I),
     "drip": re.compile(r"dividend reinvest|\bDRIP\b", re.I),
@@ -93,6 +95,8 @@ class InsiderTx:
     context: tuple[str, ...]
     discretionary: bool
     plan_10b5_1: bool
+    # confirmed | denied | unknown | not_applicable - eine fehlende Angabe ist KEIN "Nein"
+    plan_status: str = "unknown"
     equity_swap: bool | None = None
     underlying_security: str | None = None
     exercise_price: float | None = None
@@ -135,12 +139,34 @@ def _context(notes: list[str], remarks: str | None) -> set[str]:
     return {k for k, rx in _PATTERNS.items() if rx.search(blob)}
 
 
+PLAN_STATUSES = ("confirmed", "denied", "unknown", "not_applicable")
+
+
+def plan_status(document_type: str, ctx: set[str], doc_10b5_1: bool | None) -> str:
+    """
+    Handelsplan nach Rule 10b5-1:
+      confirmed       Checkbox gesetzt oder Fussnote verweist auf einen Plan
+      denied          Checkbox ausdruecklich nicht gesetzt oder Fussnote verneint einen Plan
+      unknown         keine Angabe (z. B. Meldungen vor Einfuehrung der Checkbox 2023)
+      not_applicable  Form 3 (Erstmeldung eines Bestands) - dort gibt es keine Planangabe
+    """
+    if document_type.upper().startswith("3"):
+        return "not_applicable"
+    if "no_plan_10b5_1" in ctx:
+        return "denied"
+    if doc_10b5_1 is True or "plan_10b5_1" in ctx:
+        return "confirmed"
+    if doc_10b5_1 is False:
+        return "denied"
+    return "unknown"
+
+
 def classify(code: str | None, table: str, acquired: str | None, ctx: set[str], doc_10b5_1: bool | None) -> tuple[str, float, bool, bool]:
     """
     Rueckgabe: (Klasse, Konfidenz 0..1, diskretionaer, 10b5-1-Plan).
     Konfidenz sinkt, wenn Fussnoten der reinen Code-Deutung widersprechen oder sie ergaenzen muessen.
     """
-    plan = bool(doc_10b5_1) or "plan_10b5_1" in ctx
+    plan = (bool(doc_10b5_1) or "plan_10b5_1" in ctx) and "no_plan_10b5_1" not in ctx
     c = (code or "").upper()
     if c == "P":
         if ctx & {"drip", "espp"}:
@@ -192,6 +218,7 @@ def parse_form4(xml_text: str) -> Form4:
             officer_title=text(child(rel, "officerTitle")), is_ten_percent_owner=bool(flag(text(child(rel, "isTenPercentOwner")))),
             is_other=bool(flag(text(child(rel, "isOther"))))))
     doc_plan = flag(text(child(root, "aff10b5One")))
+    doc_type = text(child(root, "documentType")) or "4"
     txs: list[InsiderTx] = []
     seq = 0
     for table_name, row_name, table in (("nonDerivativeTable", "nonDerivativeTransaction", "non_derivative"),
@@ -212,11 +239,11 @@ def parse_form4(xml_text: str) -> Form4:
                 ownership=value(row, "ownershipNature", "directOrIndirectOwnership"),
                 nature_of_ownership=value(row, "ownershipNature", "natureOfOwnership"),
                 footnotes=tuple(notes), classification=cls, classification_confidence=conf, context=tuple(sorted(ctx)),
-                discretionary=disc, plan_10b5_1=plan, equity_swap=flag(text(path(row, "transactionCoding", "equitySwapInvolved"))),
+                discretionary=disc, plan_10b5_1=plan, plan_status=plan_status(doc_type, ctx, doc_plan), equity_swap=flag(text(path(row, "transactionCoding", "equitySwapInvolved"))),
                 underlying_security=value(row, "underlyingSecurity", "underlyingSecurityTitle"),
                 exercise_price=num(value(row, "conversionOrExercisePrice"))))
             seq += 1
-    return Form4(document_type=text(child(root, "documentType")) or "4", period_of_report=_date(text(child(root, "periodOfReport"))),
+    return Form4(document_type=doc_type, period_of_report=_date(text(child(root, "periodOfReport"))),
                  issuer_cik=issuer_cik.lstrip("0") or "0", issuer_name=text(child(issuer, "issuerName")),
                  issuer_ticker=(text(child(issuer, "issuerTradingSymbol")) or "").upper() or None,
                  owners=tuple(owners), plan_10b5_1_flag=doc_plan, transactions=tuple(txs), footnotes=footnotes, remarks=remarks)

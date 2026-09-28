@@ -47,3 +47,21 @@ def test_corrupt_or_wrong_document_raises_parse_error():
         parse_form4("<informationTable/>")
     with pytest.raises(SecParseError):
         parse_form4("<ownershipDocument><issuer/></ownershipDocument>")  # Pflichtfeld fehlt
+
+
+def test_plan_status_distinguishes_confirmed_denied_unknown_and_not_applicable():
+    from quant.sec.form4 import plan_status
+    assert plan_status("4", set(), True) == "confirmed"
+    assert plan_status("4", {"plan_10b5_1"}, None) == "confirmed"
+    assert plan_status("4", set(), False) == "denied"
+    assert plan_status("4", set(), None) == "unknown", "fehlende Angabe ist kein Nein"
+    assert plan_status("4", {"plan_10b5_1", "no_plan_10b5_1"}, None) == "denied", "verneinende Fussnote ist kein Plan"
+    assert plan_status("3", set(), None) == "not_applicable"
+
+
+def test_negated_plan_footnote_is_not_read_as_plan():
+    from quant.sec.form4 import _context, classify
+    ctx = _context(["The shares were purchased in the open market and not pursuant to a Rule 10b5-1 trading plan."], None)
+    assert "no_plan_10b5_1" in ctx
+    cls, _conf, discretionary, plan = classify("P", "non_derivative", "A", ctx, None)
+    assert cls == "OPEN_MARKET_BUY" and discretionary and plan is False

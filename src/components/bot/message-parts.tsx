@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ArchivedMessage, MessageLink, Observation } from "@/lib/services/bot-feed";
-import { MESSAGE_KIND_LABEL } from "@/lib/services/bot-feed";
+import { MESSAGE_KIND_LABEL, PLAN_LABEL, planStatusOf } from "@/lib/services/bot-feed";
 import { linkText, timeline } from "@/lib/bot/message-view";
 import { Card, CardBody, Chip } from "@/components/ui/primitives";
 import { formatCompact, formatDate, formatDateTime, formatNumber } from "@/lib/finance/format";
@@ -61,7 +61,7 @@ export function Observations({ items }: { items: Observation[] }) {
               <div className="flex flex-wrap items-center gap-1.5">
                 <Chip tone={o.direction === "buy" ? "pos" : "neg"}>{o.direction === "buy" ? "▲ Kauf" : "▼ Verkauf"}</Chip>
                 {o.amendment ? <Chip tone="warn">Berichtigung (4/A)</Chip> : null}
-                <Chip tone="neutral">{o.plan_10b5_1 ? "mit Handelsplan 10b5-1" : "ohne erkennbaren Handelsplan"}</Chip>
+                <Chip tone={planStatusOf(o) === "confirmed" || planStatusOf(o) === "denied" ? "neutral" : "warn"}>{PLAN_LABEL[planStatusOf(o)]}</Chip>
               </div>
               <p className="mt-2 text-[14px] font-bold">{o.owner} <span className="font-normal text-muted">· {o.role}</span></p>
               <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">

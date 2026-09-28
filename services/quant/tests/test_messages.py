@@ -323,7 +323,7 @@ def test_received_at_and_hash_verification(db):
     detect_insider_messages(db, now + timedelta(minutes=5))
     for r in db.execute("SELECT * FROM bot_messages").fetchall():
         assert r["received_at"] == now and r["published_at"] <= r["received_at"] <= r["detected_at"]
-        assert r["materiality"] in ("hoch", "mittel") and r["rule_version"] == "insider-rules-1.1"
+        assert r["materiality"] in ("hoch", "mittel") and r["rule_version"] == "insider-rules-1.2"
         assert verify_hash(r) is True
         assert verify_hash({**r, "value_usd": (r["value_usd"] or 0) + 1}) is False
     assert verify_hash({"rule_version": "unbekannt"}) is None
@@ -403,3 +403,28 @@ def test_correction_of_a_member_creates_a_corrected_cluster_message(db):
     assert ("insider_cluster", "berichtigt", "insider_cluster") in rel
     assert ("insider_cluster", "berichtigt", "insider_buy") in rel, "auch die fruehere Einzelmeldung gilt als berichtigt"
     assert detect_insider_messages(db, t3 + timedelta(hours=1)) == 0, "Berichtigung wird nicht wiederholt"
+
+
+def test_unknown_plan_is_not_treated_as_no_plan(db):
+    DOCS["/u.xml"] = form4("OHNE ANGABE", "P", "2026-09-22", 1_000, 50, 4_000).replace("<aff10b5One>0</aff10b5One>", "")
+    unknown = ("0000000042-26-000009", "2026-09-23", "2026-09-22", "2026-09-23T15:00:00.000Z", "4", "xslF345X05/u.xml")
+    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    ingest(db, [unknown], now)
+    assert db.execute("SELECT plan_status FROM insider_transactions").fetchone()["plan_status"] == "unknown"
+    detect_insider_messages(db, now)
+    m = db.execute("SELECT * FROM bot_messages").fetchone()
+    assert m["observations"][0]["plan_status"] == "unknown"
+    assert "ohne Angabe zu einem Handelsplan" in m["relevance"] and "nicht sicher belegt" in m["uncertainty"]
+    assert m["rule_version"] == "insider-rules-1.2"
+
+
+def test_legacy_rows_without_plan_status_are_marked_uncertain(db):
+    from quant.messages import load_transactions
+    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], now)
+    # Zustand vor Migration 0013 nachbilden: Zeile ohne plan_status (neue Testdatenbank, nicht das Archiv)
+    db.execute("ALTER TABLE insider_transactions DISABLE TRIGGER insider_transactions_append_only")
+    db.execute("UPDATE insider_transactions SET plan_status = NULL")
+    db.execute("ALTER TABLE insider_transactions ENABLE TRIGGER insider_transactions_append_only")
+    tx = load_transactions(db, now)[0]
+    assert tx.plan_status == "legacy_uncertain"

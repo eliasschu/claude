@@ -13,6 +13,7 @@ import { ScorecardCard } from "@/components/stock/scorecard-card";
 import { formatNumber, formatPrice } from "@/lib/finance/format";
 import { SmartSearch } from "@/components/layout/smart-search";
 import { StockUnavailable } from "@/components/stock/stock-unavailable";
+import { ThesisPanel } from "@/components/thesis/thesis-panel";
 
 export const dynamicParams = true;
 // Spaetestens alle 15 Minuten neu erzeugen - auch eine beim Build ausgefallene Quelle bleibt so nicht dauerhaft im Cache.
@@ -31,6 +32,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 }
 
 const SECTIONS = [
+  { href: "#these", label: "Meine These" },
   { href: "#bewertung", label: "Bewertung" },
   { href: "#scorecard", label: "Scorecard" },
   { href: "#meldungen", label: "Meldungen" },
@@ -114,6 +116,11 @@ export default async function StockPage({ params }: Params) {
           </a>
         ))}
       </nav>
+
+      <section id="these" aria-labelledby="these-titel" className="scroll-mt-32">
+        <h2 id="these-titel" className="mb-2 text-[15px] font-bold">Meine These</h2>
+        <ThesisPanel ticker={listing.ticker} companyName={company.name} />
+      </section>
 
       <div id="bewertung" className="scroll-mt-32">
         <FairValueCard valuation={valuation} price={quote?.price ?? 0} currency={quote?.currency ?? model.currency ?? "USD"} meta={factsUiMeta} />

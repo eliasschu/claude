@@ -198,8 +198,30 @@ export interface ArchivedMessage {
 export interface Observation {
   accession: string; owner: string; role: string; direction: "buy" | "sale"; trade_dates: string[];
   shares: number | null; value_usd: number | null; shares_after: number | null; share_of_holding: number | null;
-  plan_10b5_1: boolean; discretionary: boolean; classification_confidence: number;
+  plan_10b5_1: boolean;
+  /** Ab Regelversion 1.2. Fehlt es, stammt die Meldung aus einer aelteren Speicherung (siehe planStatusOf). */
+  plan_status?: PlanStatus;
+  discretionary: boolean; classification_confidence: number;
   published_at: string | null; source_url: string | null; received_at?: string | null; amendment?: boolean;
+}
+
+export type PlanStatus = "confirmed" | "denied" | "unknown" | "not_applicable" | "legacy_uncertain";
+
+export const PLAN_LABEL: Record<PlanStatus, string> = {
+  confirmed: "mit Handelsplan 10b5-1",
+  denied: "ohne Handelsplan laut Meldung",
+  unknown: "Handelsplan nicht angegeben",
+  not_applicable: "Handelsplan-Angabe nicht vorgesehen",
+  legacy_uncertain: "Handelsplan nicht sicher erfasst",
+};
+
+/**
+ * Handelsplan einer Einzelangabe. Aeltere Meldungen (vor Regelversion 1.2) kennen nur ja/nein; ein "nein"
+ * konnte dort auch "keine Angabe" bedeuten und gilt deshalb als nicht sicher erfasst.
+ */
+export function planStatusOf(o: Pick<Observation, "plan_10b5_1" | "plan_status">): PlanStatus {
+  if (o.plan_status) return o.plan_status;
+  return o.plan_10b5_1 ? "confirmed" : "legacy_uncertain";
 }
 
 export type LinkRelation = "berichtigt" | "erweitert" | "fasst_zusammen";

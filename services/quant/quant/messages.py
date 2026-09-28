@@ -30,7 +30,7 @@ from .db import Conn
 
 log = logging.getLogger("quant.messages")
 
-RULE_VERSION = "insider-rules-1.1"
+RULE_VERSION = "insider-rules-1.2"
 RULES = {
     "max_age_days": 14,          # nur Meldungen, die hoechstens so alt sind (Veroeffentlichung)
     "cluster_min_owners": 2,     # Cluster: mindestens so viele verschiedene Insider ...
@@ -47,6 +47,8 @@ UNCERTAINTY = {
     "cluster": ("Mehrere Käufe in kurzer Zeit sind auffälliger als ein einzelner, belegen aber keine Kursentwicklung. Die Personen "
                 "können sich abgesprochen haben oder aus ähnlichen persönlichen Gründen handeln."),
 }
+UNCERTAINTY_PLAN = " Ob ein vorab festgelegter Handelsplan (Rule 10b5-1) besteht, ist nicht sicher belegt."
+
 COUNTER = {
     "buy": ["Der Kauf kann gemessen am Vermögen der Person klein sein.",
             "Insider irren sich ebenso wie andere Anleger; ein einzelner Kauf ist kein Beleg."],
@@ -117,6 +119,8 @@ class Tx:
     shares_after: float | None = None
     discretionary: bool = True
     plan: bool = False
+    # confirmed | denied | unknown | not_applicable | legacy_uncertain (vor Migration 0013 gespeichert, Bedeutung nicht belegbar)
+    plan_status: str = "denied"
     published_at: datetime | None = None
     url: str | None = None
     confidence: float = 1.0
@@ -137,6 +141,7 @@ class Tx:
         return {"accession": self.accession, "owner": self.owner, "role": self.role, "direction": self.kind,
                 "trade_dates": [d.isoformat() for d in sorted(self.dates)], "shares": self.shares, "value_usd": self.value,
                 "shares_after": self.shares_after, "share_of_holding": self.share_of_holding, "plan_10b5_1": self.plan,
+                "plan_status": self.plan_status,
                 "discretionary": self.discretionary, "classification_confidence": self.confidence,
                 "published_at": self.published_at.isoformat() if self.published_at else None, "source_url": self.url,
                 "received_at": self.received_at.isoformat() if self.received_at else None, "amendment": self.amendment}
@@ -172,8 +177,33 @@ def load_transactions(conn: Conn, now: datetime) -> list[Tx]:
             tx.shares_after = r["shares_after"]
         tx.discretionary = tx.discretionary and r["discretionary"]
         tx.plan = tx.plan or r["plan_10b5_1"]
+        tx.plan_status = _merge_plan(tx.plan_status, _row_plan_status(r))
         tx.confidence = min(tx.confidence, r["classification_confidence"])
     return resolve_amendments(list(grouped.values()))
+
+
+def _row_plan_status(r: dict[str, Any]) -> str:
+    if r.get("plan_status"):
+        return str(r["plan_status"])
+    # Vor Migration 0013: true war belegt, false konnte auch "keine Angabe" bedeuten
+    return "confirmed" if r["plan_10b5_1"] else "legacy_uncertain"
+
+
+_PLAN_ORDER = ("confirmed", "legacy_uncertain", "unknown", "not_applicable", "denied")
+
+
+def _merge_plan(a: str, b: str) -> str:
+    """Mehrere Zeilen einer Meldung: ein belegter Plan zaehlt, sonst die unsicherste Angabe."""
+    return min(a, b, key=_PLAN_ORDER.index)
+
+
+PLAN_TEXT = {
+    "confirmed": "mit vorab festgelegtem Handelsplan (Rule 10b5-1)",
+    "denied": "ohne Handelsplan laut Meldung",
+    "unknown": "ohne Angabe zu einem Handelsplan",
+    "not_applicable": "Handelsplan-Angabe nicht vorgesehen",
+    "legacy_uncertain": "Handelsplan nicht sicher erfasst (ältere Speicherung)",
+}
 
 
 def resolve_amendments(txs: list[Tx]) -> list[Tx]:
@@ -271,9 +301,11 @@ def cluster_message(members: list[Tx]) -> Message:
         title=("Berichtigung: " if corrects else "")
               + f"{len(owners)} Insider von {name} kaufen innerhalb von {span + 1} {'Tag' if span == 0 else 'Tagen'}"
               + (f" für zusammen {money(value)}" if value is not None else ""),
-        relevance=f"Käufe am offenen Markt durch {', '.join(owners)}. Keine der Meldungen verweist auf einen vorab festgelegten Plan. "
-                  "Mehrere Personen mit Einblick in dasselbe Unternehmen setzen eigenes Geld ein.",
-        uncertainty=UNCERTAINTY["cluster"], counter_arguments=COUNTER["cluster"],
+        relevance=f"Käufe am offenen Markt durch {', '.join(owners)}. "
+                  + ("Laut allen Meldungen ohne vorab festgelegten Handelsplan. " if all(t.plan_status == "denied" for t in members)
+                     else "Keine der Meldungen gibt einen vorab festgelegten Handelsplan an; bei einigen fehlt die Angabe ganz. ")
+                  + "Mehrere Personen mit Einblick in dasselbe Unternehmen setzen eigenes Geld ein.",
+        uncertainty=UNCERTAINTY["cluster"] + (UNCERTAINTY_PLAN if any(t.plan_status != "denied" for t in members) else ""), counter_arguments=COUNTER["cluster"],
         observations=[t.observation() for t in members], sources=_sources(members),
         selection=f"Mehrere Insider ({len(owners)}) mit Käufen innerhalb von {RULES['cluster_window_days']} Tagen.",
         value_usd=value, traded_from=dates[0], traded_to=dates[-1],
@@ -286,8 +318,9 @@ def cluster_message(members: list[Tx]) -> Message:
 def single_message(tx: Tx, level: str) -> Message:
     buy = tx.kind == "buy"
     dates = sorted(tx.dates)
-    rel = ["Kauf am offenen Markt ohne erkennbaren Plan." if buy else
-           f"Großer Verkauf ohne erkennbaren Plan (ab {RULES['large_sale_usd'] / 1e6:.0f} Mio. $ oder "
+    plan_note = PLAN_TEXT[tx.plan_status]
+    rel = [f"Kauf am offenen Markt, {plan_note}." if buy else
+           f"Großer Verkauf, {plan_note} (ab {RULES['large_sale_usd'] / 1e6:.0f} Mio. $ oder "
            f"{RULES['large_sale_share'] * 100:.0f} % des Bestands)."]
     share = tx.share_of_holding
     if share is not None and share >= 0.05:
@@ -300,7 +333,8 @@ def single_message(tx: Tx, level: str) -> Message:
         title=("Berichtigung: " if tx.amendment else "")
               + f"{tx.owner} ({tx.role}) {'kauft' if buy else 'verkauft'} {tx.ticker or tx.issuer_name}-Aktien"
               + (f" für {money(tx.value)}" if tx.value is not None else ""),
-        relevance=" ".join(rel), uncertainty=UNCERTAINTY["buy" if buy else "sale"], counter_arguments=COUNTER["buy" if buy else "sale"],
+        relevance=" ".join(rel),
+        uncertainty=UNCERTAINTY["buy" if buy else "sale"] + (UNCERTAINTY_PLAN if tx.plan_status != "denied" else ""), counter_arguments=COUNTER["buy" if buy else "sale"],
         observations=[tx.observation()], sources=_sources([tx]), selection=f"Aussagekraft {level} nach den Insider-Regeln.",
         value_usd=tx.value, traded_from=dates[0] if dates else None, traded_to=dates[-1] if dates else None,
         published_at=tx.published_at,  # type: ignore[arg-type]
@@ -326,6 +360,7 @@ HASH_FIELDS: dict[str, tuple[str, ...]] = {
                           "published_at"),
 }
 HASH_FIELDS["insider-rules-1.1"] = (*HASH_FIELDS["insider-rules-1.0"], "received_at", "materiality", "amendment")
+HASH_FIELDS["insider-rules-1.2"] = HASH_FIELDS["insider-rules-1.1"]
 
 
 def content_hash(values: dict[str, Any], rule_version: str) -> str:

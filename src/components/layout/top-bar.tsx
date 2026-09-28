@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, Bookmark, Bot, Building2, Fish, LineChart, Newspaper, TrendingUp, UserRound } from "lucide-react";
+import { Bell, Bookmark, Bot, Building2, NotebookPen, Fish, LineChart, Newspaper, TrendingUp, UserRound } from "lucide-react";
 import { HeaderSearch } from "./header-search";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ const PRIMARY_NAV = [
   { href: "/", label: "Start", icon: null },
   { href: "/bot", label: "Bot", icon: Bot },
   { href: "/aktien", label: "Aktien", icon: Building2 },
+  { href: "/thesen", label: "Meine Thesen", icon: NotebookPen },
   { href: "/tracker", label: "Insider", icon: TrendingUp },
   { href: "/grosse-fische", label: "Große Fische", icon: Fish },
   { href: "/maerkte", label: "Märkte", icon: LineChart },

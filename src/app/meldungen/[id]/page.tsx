@@ -54,6 +54,11 @@ export default async function MessagePage({ params }: Params) {
         </p>
         <h1 className="mt-1 text-[22px] font-extrabold leading-snug tracking-[-0.02em] sm:text-[28px]">{m.title}</h1>
         <p className="mt-2 max-w-[70ch] text-[14px] leading-relaxed">{m.relevance}</p>
+        {m.ticker ? (
+          <Link href={`/aktie/${m.ticker}#these`} className="mt-3 inline-flex h-9 items-center rounded-[10px] border border-line-strong bg-surface px-3 text-[13px] font-semibold hover:bg-surface-2">
+            These zu {m.ticker} festhalten oder prüfen
+          </Link>
+        ) : null}
         {late ? <p className="mt-3 rounded-[10px] border border-warn/40 bg-warn-soft px-3 py-2 text-[12px] leading-relaxed">{late}</p> : null}
       </header>
 

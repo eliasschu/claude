@@ -29,7 +29,7 @@ Legende:
 | Interne Handelssignal-Engine (Paper) | ✔ | ✔ | ✖ | bleibt intern |
 | Meldungsdetailseite, Archiv mit Filtern und Abdeckungslücken, verknüpfte Berichtigungen und Erweiterungen, Kursverlauf ab Veröffentlichung und ab Erkennung | ✔ | ✔ (Regeln, Verknüpfungen, Prüfsumme, Kursverlauf; End-to-End mit Testfirma) | ✖ | Etappe B. Neuordnung der Aktienseite noch offen |
 | „Was hat sich verändert?“ für die Watchlist | ✖ | ✖ | ✖ | Etappe C |
-| Thesen-Tagebuch | ✖ | ✖ | ✖ | Etappe C |
+| Thesen-Tagebuch (lokal): Versionen mit Pflichtgrund, manuelle Prüfungen, Wiedervorlage, Archiv, Export/Import/Löschen | ✔ | ✔ (Modell, Konflikte; Browser-Ablauf mit Testfirma) | – (nur im Browser) | Etappe C. Automatische Kriterienprüfung: Etappe D |
 | Berichtsvergleiche (Quartal/Jahr) | ✖ | ✖ | ✖ | Etappe D |
 | Persönliche Szenarien, Bewertungsverlauf | ✖ | ✖ | ✖ | Etappe E |
 | Regeln, Prüfungen, Wochenrückblick | ✖ | ✖ | ✖ | Etappe F |
@@ -222,3 +222,62 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
 **NEXT**
 - Etappe C: „Was hat sich verändert?“ für die Watchlist und das Thesen-Tagebuch mit manuellen Kriterien, Versionen und Export/Import.
 - Dazu die Neuordnung der Aktienseite.
+
+## 9. Etappe C: Ergebnis (Thesen-Tagebuch, Handelsplan)
+
+**CHANGED**
+- **Handelsplan (Rule 10b5-1) mit vier Zuständen:** bestätigt, verneint, unbekannt, nicht anwendbar.
+  - Bisher wurde eine **fehlende Angabe als „kein Plan“** gespeichert.
+  - Fußnoten wie „not pursuant to a Rule 10b5-1 plan“ galten fälschlich als Plan. Sie werden jetzt als Verneinung erkannt.
+  - Migration `0013` fügt `plan_status` hinzu. Alte Zeilen bleiben unverändert: `NULL` gilt als „nicht sicher erfasst“, ein altes `true` bleibt „bestätigt“.
+  - Regelversion `insider-rules-1.2`: Einordnung und Unsicherheitstexte benennen einen unbekannten Plan ausdrücklich.
+  - Archivierte ältere Meldungen werden nicht verändert. Die Website zeigt bei ihnen „Handelsplan nicht sicher erfasst“.
+- **Thesen-Tagebuch (`src/lib/thesis/model.ts`, reine Funktionen):**
+  - Inhalt:
+    - Haltung (beobachten/besitzen);
+    - Grund, Erwartungen, Gegenargumente, „Was mich umstimmen würde“;
+    - Zeithorizont und nächste Prüfung;
+    - messbare Kriterien (Kennzahl mit fester Einheit, Vergleich, Schwelle, Quartal/Geschäftsjahr, 1–8 Perioden in Folge);
+    - freie Prüfpunkte.
+  - Jede inhaltliche Änderung wird eine neue Version mit Pflichtgrund. Unveränderte Inhalte werden abgelehnt, und das Unternehmen einer These ist nicht änderbar.
+  - Prüfungen sind eigene datierte Einträge mit manueller Einschätzung je Kriterium und Prüfpunkt, Ergebnis, Begründung und neuer Wiedervorlage.
+  - Der Lebenszyklus (aktiv/archiviert, mit Grund protokolliert) ist getrennt vom Prüfstatus. Archivierte Thesen sind nie fällig, wieder aktivierte werden weiter geprüft.
+  - Vergleich zweier Versionen feldweise.
+  - **Export** als JSON mit Format und Formatversion.
+  - **Import** mit strenger Prüfung. Einordnung jeder These als neu, identisch, erweitert oder abweichend. Standard ist Auslassen. Abweichende Thesen lassen sich nur als Kopie mit Herkunftsvermerk anlegen; es wird nie still überschrieben.
+  - **Löschen** nur nach Eingabe von „LÖSCHEN“.
+- **Speicherung (`src/lib/thesis/storage.ts`):**
+  - `localStorage` im Exportformat, über Browser-Tabs hinweg synchron.
+  - Ein beschädigter Speicher wird gemeldet und nicht überschrieben. Der Rohinhalt lässt sich herunterladen.
+  - Speicherfehler (voll, gesperrt) werden angezeigt.
+- **Oberfläche:**
+  - Aktienseite: Abschnitt „Meine These“ (anlegen, ansehen, bearbeiten, prüfen, Verlauf und Vergleich, archivieren).
+  - Neue Seite `/thesen` („Meine Thesen“: aktiv, fällig, archiviert; Export, Import mit Vorschau, Löschen).
+  - Neuer Menüpunkt; Link von jeder Meldung zur These.
+  - Überall der Hinweis auf Browserbindung und Verlustrisiko. Kein Gesamturteil „These intakt“. An jedem Kriterium steht „Automatische Prüfung noch nicht verfügbar“.
+
+**TESTED**
+- Python: 173 Tests grün, davon 4 neu (Planzustände, verneinende Fußnote, unbekannter Plan in Meldungen, alte Zeilen). `ruff` und `mypy` ohne Befund.
+- Website: 207 Tests grün, davon 12 neu:
+  - Versionierung, Pflichtgrund, keine Leerversion;
+  - Fälligkeit, Prüfung ohne neue Version, archiviert nie fällig, spätere Version überschreibt eine frühere Wiedervorlage;
+  - Export/Import mit falschem Format, falscher Version, fehlendem Grund und ungültigem Kriterium;
+  - Import-Einordnung, kein stilles Überschreiben, Kopie, bewusste Übernahme;
+  - Anzeige des Handelsplans bei alten Meldungen.
+- Typprüfung ohne Befund, ESLint unverändert (5 Altfehler), Produktions-Build erfolgreich.
+- **Browserablauf** (Playwright; Aktienseite mit nachgebildeter SEC-Antwort einer fiktiven Testfirma):
+  - Pflichtfeld-Fehler, anlegen, Fälligkeit, bearbeiten ohne und mit Grund, Versionsvergleich, Prüfung dokumentieren;
+  - Export, Import identisch und abweichend (nur Auslassen oder Kopie), kaputte Datei, Löschen mit Bestätigung;
+  - Smartphone und Desktop, hell und dunkel, ohne JavaScript-Fehler.
+
+**Grenzen**
+- Thesen gibt es nur im Browser: kein Konto, kein Zugriffsschutz, nicht manipulationssicher. Ein Export ist die einzige Sicherung.
+- Mehrere aktive Thesen zum selben Unternehmen (etwa nach dem Import einer Kopie) sind möglich. Die Aktienseite zeigt die zuletzt bearbeitete und weist auf die übrigen hin.
+- Der echte Bot-Test auf dem Mac mit SEC-Daten steht weiter aus.
+
+**Offen für Etappe D**
+- Automatische Prüfung der Kriterien aus SEC Company Facts:
+  - Quartal und Jahr getrennt, kumulierte Cashflows korrekt, fehlende Perioden nie überspringen;
+  - Zustände: nicht ausgelöst, ausgelöst, unzureichende Daten, veraltet, nicht unterstützt;
+  - Abdeckung, etwa „2 von 3 prüfbar“.
+- Nettoverschuldung ÷ operativer Cashflow nur bei vollständigen Komponenten.
