@@ -11,6 +11,7 @@ import { PriceChart } from "@/components/stock/price-chart";
 import { FairValueCard } from "@/components/stock/fair-value-card";
 import { ScorecardCard } from "@/components/stock/scorecard-card";
 import { formatNumber, formatPrice } from "@/lib/finance/format";
+import { SmartSearch } from "@/components/layout/smart-search";
 
 export const dynamicParams = true;
 
@@ -35,7 +36,11 @@ const SECTIONS = [
 export default async function StockPage({ params }: Params) {
   const { symbol } = await params;
   const overview = await getStockOverview(symbol.toUpperCase());
-  if (!overview.ok) notFound();
+  if (!overview.ok) {
+    // Nur ein unbekannter Ticker ist "nicht gefunden"; ein Quellenausfall ist ein Fehler und wird so benannt.
+    if (overview.reason === "not_found") notFound();
+    throw new Error(`Unternehmensdaten nicht verfügbar: ${overview.message}`);
+  }
   const { listing, company, model, scorecard, prices, filings, factsMeta } = overview.data;
 
   const quote = prices.quote;
@@ -45,6 +50,8 @@ export default async function StockPage({ params }: Params) {
 
   return (
     <div className="space-y-5">
+      <SmartSearch scope="stock" size="lg" />
+
       <nav aria-label="Brotkrumen" className="text-[12px] text-faint">
         <Link href="/" className="hover:text-ink">Start</Link> <span aria-hidden>/</span> {company.name}
       </nav>

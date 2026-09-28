@@ -7,7 +7,7 @@ import { WatchlistProvider } from "@/components/watchlist/watchlist-provider";
 export const metadata: Metadata = {
   title: "Der junge Kapitalist",
   description:
-    "Deutschsprachige Finanzplattform für Privatanleger: Marktleiste, Fair-Value-Modell, Nachrichten und Insider-Meldungen – mit Quelle und Datenstand an jedem Wert.",
+    "Ein Bot, der relevante Veränderungen an den Märkten erkennt und verständlich meldet – mit Begründung, Unsicherheit, Quelle und Datenstand. Dazu Aktienanalysen und Insidermeldungen als Hintergrund.",
 };
 
 export const viewport: Viewport = {

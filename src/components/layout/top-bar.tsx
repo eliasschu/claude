@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Bell, Bookmark, Fish, LineChart, Newspaper, TrendingUp, UserRound } from "lucide-react";
-import { SmartSearch } from "./smart-search";
+import { Bell, Bookmark, Bot, Building2, Fish, LineChart, Newspaper, TrendingUp, UserRound } from "lucide-react";
+import { HeaderSearch } from "./header-search";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +25,15 @@ function Wordmark() {
 
 /**
  * Hauptnavigation mit Textbeschriftung - Symbole stehen nur zusaetzlich
- * daneben, nie als einziges Erkennungsmerkmal. "Deals" fuehrt vorlaeufig
- * auf /tracker (die Insider-Liste), bis eine eigene Seite dafuer existiert.
+ * daneben, nie als einziges Erkennungsmerkmal. Der Bot ist das Hauptprodukt
+ * und steht deshalb vorn; "Insider" fuehrt auf /tracker (die Insider-Liste).
  */
 const PRIMARY_NAV = [
   { href: "/", label: "Start", icon: null },
+  { href: "/bot", label: "Bot", icon: Bot },
+  { href: "/aktien", label: "Aktien", icon: Building2 },
+  { href: "/tracker", label: "Insider", icon: TrendingUp },
   { href: "/grosse-fische", label: "Große Fische", icon: Fish },
-  { href: "/tracker", label: "Deals", icon: TrendingUp },
   { href: "/maerkte", label: "Märkte", icon: LineChart },
   { href: "/watchlist", label: "Watchlist", icon: Bookmark },
 ];
@@ -69,24 +71,9 @@ export function TopBar() {
         <div className="flex items-center gap-3">
           <Wordmark />
 
-          <div className="hidden min-w-0 flex-1 md:block">
-            <SmartSearch />
-          </div>
+          <HeaderSearch className="hidden min-w-0 flex-1 md:block" />
 
-          <nav className="ml-auto hidden items-center gap-1 lg:flex" aria-label="Hauptbereiche">
-            {PRIMARY_NAV.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[13px] font-semibold text-muted hover:bg-surface-2 hover:text-ink"
-              >
-                {item.icon ? <item.icon size={15} aria-hidden /> : null}
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="ml-auto flex items-center gap-1.5 lg:ml-0">
+          <div className="ml-auto flex items-center gap-1.5">
             <IconLink href="/nachrichten" label="Nachrichten" wideOnly>
               <Newspaper size={17} aria-hidden />
             </IconLink>
@@ -100,11 +87,9 @@ export function TopBar() {
           </div>
         </div>
 
-        <div className="mt-2.5 md:hidden">
-          <SmartSearch />
-        </div>
+        <HeaderSearch className="mt-2.5 md:hidden" />
 
-        <nav className="rail mt-2.5 flex gap-1.5 overflow-x-auto lg:hidden" aria-label="Hauptbereiche">
+        <nav className="rail mt-2.5 flex gap-1.5 overflow-x-auto" aria-label="Hauptbereiche">
           {PRIMARY_NAV.map((item) => (
             <Link
               key={item.label}
