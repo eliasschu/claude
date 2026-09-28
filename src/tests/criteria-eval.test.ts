@@ -329,3 +329,18 @@ describe("Speicherung und Quellenausfall", () => {
     assert.equal(current(parsed.theses[0]).version, 1);
   });
 });
+
+describe("Kriterien-Vorschläge aus SEC-Daten", async () => {
+  const { suggestCriteria } = await import("../lib/thesis/suggest.ts");
+  test("Marge minus 5 Prozentpunkte, Umsatzwachstum unter 0 %, fehlende Kennzahlen benannt", () => {
+    const facts = normalizeCompanyFacts(company({ [REV]: quarters([100, 100, 100, 100, 100, 110]), [OI]: quarters([30, 30, 30, 30, 30, 46.1 * 1.1]) }));
+    let i = 0;
+    const s = suggestCriteria(facts, "2026-08-15", () => `s${++i}`);
+    const om = s.criteria.find((c) => c.metric === "operating_margin")!;
+    assert.equal(om.threshold, 41.1);
+    assert.equal(om.operator, "<");
+    assert.equal(om.consecutive, 2);
+    assert.equal(s.criteria.find((c) => c.metric === "revenue_growth_yoy")?.threshold, 0);
+    assert.deepEqual(s.missing, ["fcf_margin"], "ohne Cashflow-Daten kein FCF-Vorschlag");
+  });
+});

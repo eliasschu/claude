@@ -78,12 +78,12 @@ describe("Branchenlogik", () => {
     assert.match(model.reasons.join(" "), /Schulden Teil des Geschäftsmodells/);
     assert.equal(model.profile.key, "finanzen");
   });
-  test("blendet die Bilanz-Dimension bei Finanzunternehmen aus", () => {
+  test("Finanzunternehmen: Bilanz über Eigenkapitalquote – ohne Bilanzsumme keine Wertung", () => {
     const f = healthy();
     const card = buildScorecard(f, financialMetrics(f), { sic: "6021" });
     const bilanz = card.dimensions.find((d) => d.key === "bilanz")!;
     assert.equal(bilanz.score, null);
-    assert.match(bilanz.unavailableReason!, /nicht aussagekräftig/);
+    assert.match(bilanz.unavailableReason!, /Eigenkapitalquote/);
   });
 });
 

@@ -10,7 +10,7 @@ import { WatchButton } from "@/components/watchlist/watch-button";
 import { PriceChart } from "@/components/stock/price-chart";
 import { FairValueCard } from "@/components/stock/fair-value-card";
 import { ScorecardCard } from "@/components/stock/scorecard-card";
-import { formatNumber, formatPrice } from "@/lib/finance/format";
+import { formatDate, formatNumber, formatPrice } from "@/lib/finance/format";
 import { SmartSearch } from "@/components/layout/smart-search";
 import { StockUnavailable } from "@/components/stock/stock-unavailable";
 import { ThesisPanel } from "@/components/thesis/thesis-panel";
@@ -47,7 +47,7 @@ export default async function StockPage({ params }: Params) {
     if (overview.reason === "not_found") notFound();
     return <StockUnavailable detail={overview.message} />;
   }
-  const { listing, company, model, scorecard, prices, filings, factsMeta } = overview.data;
+  const { listing, company, model, scorecard, prices, filings, factsMeta, metrics } = overview.data;
 
   const quote = prices.quote;
   const candles: Candle[] = (prices.daily ?? []).map(([t, close]) => ({ date: new Date(t).toISOString(), close }));
@@ -101,10 +101,12 @@ export default async function StockPage({ params }: Params) {
               {prices.quoteMeta ? <DataStamp meta={toUiMeta(prices.quoteMeta)} className="mt-3" /> : null}
             </>
           ) : (
-            <p className="mt-4 rounded-[10px] border border-dashed border-line-strong px-4 py-3 text-[13px] text-muted">
-              Kein Kurs verfügbar{prices.unavailable ? `: ${prices.unavailable}` : "."} Die Bewertung unten beruht nur auf den
-              Jahresabschlüssen.
-            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Chip tone="accent" title={prices.unavailable ?? undefined}>
+                Analyse-Modus: SEC-EDGAR-Fundamentaldaten{factsMeta.observedAt ? ` (Stand: ${formatDate(factsMeta.observedAt)})` : ""}
+              </Chip>
+              <span className="text-[12px] text-faint">ohne Live-Kurs · Bewertung aus den Jahresabschlüssen</span>
+            </div>
           )}
         </CardBody>
       </Card>
@@ -123,7 +125,8 @@ export default async function StockPage({ params }: Params) {
       </section>
 
       <div id="bewertung" className="scroll-mt-32">
-        <FairValueCard valuation={valuation} price={quote?.price ?? 0} currency={quote?.currency ?? model.currency ?? "USD"} meta={factsUiMeta} />
+        <FairValueCard valuation={valuation} price={quote?.price ?? null} currency={quote?.currency ?? model.currency ?? "USD"} meta={factsUiMeta}
+          anchor={{ bookValuePerShare: metrics.equityPerShare, note: model.profile.dcfNote }} />
       </div>
 
       <div id="scorecard" className="scroll-mt-32">

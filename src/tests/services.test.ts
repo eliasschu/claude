@@ -105,7 +105,8 @@ describe("Aktienanalyse von der Quelle bis zur Bewertung", () => {
     assert.equal(r.data.model.applicable, true);
     assert.ok(r.data.model.band.bear! < r.data.model.band.bull!);
     assert.equal(r.data.prices.quote, null);
-    assert.match(r.data.prices.unavailable!, /TWELVEDATA_API_KEY/);
+    assert.match(r.data.prices.unavailable!, /nicht angebunden/);
+    assert.doesNotMatch(r.data.prices.unavailable!, /API_KEY/, "keine Variablennamen in der Oberfläche");
     assert.equal(r.data.model.price.verdict, "Datenlage unzureichend");
     assert.equal(r.data.scorecard.overall, null);
     assert.ok(r.data.summary.bull.length > 0);

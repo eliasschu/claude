@@ -3,6 +3,13 @@
  * Gewicht und Vergleichsmassstab. Fehlende Dimensionen werden nicht mit 0
  * gefuellt. Ein Gesamtwert entsteht erst ab vier belegten Dimensionen, und
  * Warnsignale stehen immer daneben.
+ *
+ * Ersatzkennzahlen (nur aus SEC-Jahreszahlen, nie geschaetzt):
+ *  - Negatives oder fehlendes Eigenkapital: Kapitalrendite (ROIC vor Steuern) statt Eigenkapitalrendite.
+ *  - Banken/Versicherer/Finanzdienstleister: Profitabilitaet aus Eigenkapital- und Gesamtkapitalrendite,
+ *    Bilanz aus der Eigenkapitalquote (Eigenkapital ÷ Bilanzsumme) statt Nettoverschuldung.
+ *  - Immobilien: Bilanz ebenfalls aus der Eigenkapitalquote.
+ *  - Ohne Kursdaten: Fundamental-Score aus Wachstum, Profitabilitaet und Bilanz (mind. zwei davon belegt).
  */
 
 import type { CompanyFinancials, FinancialMetrics } from "./fundamentals.ts";
@@ -21,6 +28,8 @@ export interface Scorecard {
   dimensions: Dimension[];
   overall: number | null;
   overallNote: string;
+  /** Nur aus SEC-Jahreszahlen (Wachstum, Profitabilitaet, Bilanz) - auch ohne Kursdaten. */
+  fundamental: { score: number; dimensions: DimensionKey[] } | null;
   redFlags: string[];
   dataQuality: { coveragePct: number; latestFiscalYearEnd: string | null; ageMonths: number | null; note: string };
 }
@@ -43,9 +52,19 @@ export function buildScorecard(
   };
   const noPrice = "Benötigt Kursdaten; derzeit keine Quelle verbunden.";
 
-  const balanceScore = !profile.dcfSuitable
-    ? null
+  const financial = profile.key === "finanzen";
+  // Eigenkapitalquote: Banken 4 % → 0, 12 % → 100; Immobilien 20 % → 0, 60 % → 100
+  const equityRange: [number, number] | null = financial ? [4, 12] : profile.key === "immobilien" ? [20, 60] : null;
+  const balanceScore = equityRange
+    ? m.equityRatio === null ? null : scoreFromRange(m.equityRatio * 100, equityRange[0], equityRange[1])
     : m.netDebt === null ? null : m.netDebt <= 0 ? 100 : m.netDebtToOcf === null ? 0 : scoreFromRange(m.netDebtToOcf, 4, 0);
+  const useRoic = !financial && (m.negativeEquity || m.roe === null) && m.roic !== null;
+  const profitScore = financial
+    ? avg([m.roe === null ? null : scoreFromRange(m.roe * 100, 0, 20), m.roa === null ? null : scoreFromRange(m.roa * 100, 0, 1.5)])
+    : avg([
+      m.operatingMargin === null ? null : scoreFromRange(m.operatingMargin * 100, 0, 35),
+      useRoic ? scoreFromRange(m.roic! * 100, 0, 35) : m.roe === null ? null : scoreFromRange(m.roe * 100, 0, 35),
+    ]);
 
   const dims: Dimension[] = [
     {
@@ -71,32 +90,41 @@ export function buildScorecard(
     },
     {
       key: "profitabilitaet", label: "Profitabilität", weight: 0.25,
-      score: avg([
-        m.operatingMargin === null ? null : scoreFromRange(m.operatingMargin * 100, 0, 35),
-        m.roe === null ? null : scoreFromRange(m.roe * 100, 0, 35),
-      ]),
-      metrics: [
+      score: profitScore,
+      metrics: financial ? [
+        { label: "Eigenkapitalrendite", value: share(m.roe) },
+        { label: "Gesamtkapitalrendite (ROA)", value: share(m.roa) },
+      ] : [
         { label: "Operative Marge", value: share(m.operatingMargin),
           plain: m.operatingMargin === null ? undefined : `Von 100 ${fin.currency ?? "Einheiten"} Umsatz bleiben ${(m.operatingMargin * 100).toFixed(0)} vor Zinsen und Steuern übrig.` },
-        { label: "Eigenkapitalrendite", value: m.negativeEquity ? "nicht sinnvoll (negatives Eigenkapital)" : share(m.roe) },
+        useRoic
+          ? { label: "Kapitalrendite (ROIC, vor Steuern)", value: share(m.roic), plain: m.negativeEquity ? "Statt Eigenkapitalrendite, weil das Eigenkapital negativ ist." : "Statt Eigenkapitalrendite, weil diese nicht berechenbar ist." }
+          : { label: "Eigenkapitalrendite", value: m.negativeEquity ? "nicht sinnvoll (negatives Eigenkapital)" : share(m.roe) },
         { label: "Freier Cashflow zum Umsatz", value: share(m.fcfMargin) },
       ],
       direction: "Höher = profitabler",
-      method: "Operative Marge 0–35 % und Eigenkapitalrendite 0–35 % linear auf 0–100; Mittelwert.",
+      method: financial
+        ? "Eigenkapitalrendite 0–20 % und Gesamtkapitalrendite 0–1,5 % linear auf 0–100; Mittelwert (Finanzunternehmen)."
+        : `Operative Marge 0–35 % und ${useRoic ? "Kapitalrendite (Operatives Ergebnis ÷ Finanzschulden + Eigenkapital)" : "Eigenkapitalrendite"} 0–35 % linear auf 0–100; Mittelwert.`,
       comparison: "feste Schwellen, keine Branchengruppe",
     },
     {
       key: "bilanz", label: "Bilanz", weight: 0.2, score: balanceScore,
-      metrics: [
+      metrics: equityRange ? [
+        { label: "Eigenkapitalquote (Eigenkapital ÷ Bilanzsumme)", value: share(m.equityRatio),
+          plain: m.equityRatio === null ? undefined : `Von 100 ${fin.currency ?? "Einheiten"} Bilanzsumme sind ${(m.equityRatio * 100).toFixed(1).replace(".", ",")} Eigenkapital.` },
+      ] : [
         { label: "Nettoverschuldung ÷ operativer Cashflow", value: m.netDebt !== null && m.netDebt <= 0 ? "Nettoliquidität" : mult(m.netDebtToOcf),
           plain: m.netDebt !== null && m.netDebt <= 0
             ? "Das Unternehmen hat mehr Zahlungsmittel als Finanzschulden."
             : m.netDebtToOcf === null ? undefined : `Die Schulden entsprechen etwa ${m.netDebtToOcf.toFixed(1).replace(".", ",")} Jahren des operativen Cashflows.` },
       ],
       direction: "Höher = solidere Finanzierung",
-      method: "Nettoliquidität → 100; Schulden von vier Jahres-Cashflows oder mehr → 0; dazwischen linear.",
+      method: equityRange
+        ? `Eigenkapitalquote ${equityRange[0]} % → 0, ${equityRange[1]} % → 100; dazwischen linear (${profile.label}). Nettoverschuldung ist hier nicht aussagekräftig.`
+        : "Nettoliquidität → 100; Schulden von vier Jahres-Cashflows oder mehr → 0; dazwischen linear.",
       comparison: "feste Schwellen, keine Branchengruppe",
-      unavailableReason: !profile.dcfSuitable ? `Für ${profile.label} ist diese Kennzahl nicht aussagekräftig.` : undefined,
+      unavailableReason: equityRange && m.equityRatio === null ? `Für ${profile.label} wird die Eigenkapitalquote genutzt; Bilanzsumme oder Eigenkapital fehlen im Jahresabschluss.` : undefined,
     },
     {
       key: "momentum", label: "Momentum", weight: 0.05,
@@ -138,6 +166,11 @@ export function buildScorecard(
     overallNote = `Kein Gesamtwert: nur ${available.length} von ${dims.length} Dimensionen sind belegt (mindestens ${MIN_DIMENSIONS_FOR_OVERALL} nötig).`;
   }
 
+  const fundDims = dims.filter((d) => (d.key === "wachstum" || d.key === "profitabilitaet" || d.key === "bilanz") && d.score !== null);
+  const fundamental = fundDims.length >= 2
+    ? { score: Math.round(fundDims.reduce((s, d) => s + d.score! * d.weight, 0) / fundDims.reduce((s, d) => s + d.weight, 0)), dimensions: fundDims.map((d) => d.key) }
+    : null;
+
   const redFlags: string[] = [];
   if (m.negativeEquity) redFlags.push("Negatives Eigenkapital im letzten Jahresabschluss.");
   if (m.revenueGrowthLatest !== null && m.revenueGrowthLatest < 0) redFlags.push(`Umsatzrückgang im letzten Geschäftsjahr (${share(m.revenueGrowthLatest)}).`);
@@ -151,7 +184,7 @@ export function buildScorecard(
   const latestEnd = fin.latest?.end ?? null;
   const ageMonths = latestEnd ? Math.floor((now.getTime() - Date.parse(`${latestEnd}T00:00:00Z`)) / (30.44 * 86400000)) : null;
   return {
-    dimensions: dims, overall, overallNote, redFlags,
+    dimensions: dims, overall, overallNote, fundamental, redFlags,
     dataQuality: {
       coveragePct: fin.coveragePct, latestFiscalYearEnd: latestEnd, ageMonths,
       note: `${fin.coveragePct} % der Kerngrößen im letzten Jahresabschluss vorhanden${ageMonths !== null && ageMonths > 15 ? "; der letzte Jahresabschluss ist älter als 15 Monate" : ""}.`,

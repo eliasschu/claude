@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
   METRICS, OPERATORS, PERIODS, validateContent, normalizeContent,
   type MeasurableCriterion, type MetricKey, type Operator, type Period, type ThesisContent,
 } from "@/lib/thesis/model";
-import { newId } from "@/lib/thesis/storage";
+import { newId, todayLocal } from "@/lib/thesis/storage";
+import { fetchFacts } from "@/lib/thesis/auto-check";
+import { suggestCriteria, SUGGEST_MARGIN_PP, type Suggestion } from "@/lib/thesis/suggest";
 import { cn } from "@/lib/utils";
 
 const input = "w-full rounded-[10px] border border-line bg-surface px-3 py-2 text-[14px] text-ink outline-none focus:border-accent";
@@ -43,6 +45,39 @@ export function ThesisForm({ initial, mode, onSubmit, onCancel }: {
   const set = <K extends keyof ThesisContent>(k: K, v: ThesisContent[K]) => setC((x) => ({ ...x, [k]: v }));
   const setCrit = (id: string, patch: Partial<MeasurableCriterion>) =>
     set("criteria", c.criteria.map((k) => (k.id === id ? { ...k, ...patch } : k)));
+
+  // SEC-Vorschlaege: bei einer neuen These ohne Kriterien automatisch laden und vorbelegen (nur das Boersenkuerzel wird gesendet)
+  const auto = mode === "neu" && initial.criteria.length === 0;
+  const [sec, setSec] = useState<{ state: "idle" | "loading" | "ok" | "error"; s?: Suggestion; error?: string; applied?: boolean }>(
+    { state: auto ? "loading" : "idle" });
+  function applySuggestion(sg: Suggestion) {
+    const metrics = new Set(sg.criteria.map((k) => k.metric));
+    setC((x) => ({ ...x, criteria: [...x.criteria.filter((k) => !metrics.has(k.metric)), ...sg.criteria.map((k) => ({ ...k, id: newId() }))] }));
+  }
+  async function loadSec(apply: boolean) {
+    const res = await fetchFacts(initial.ticker);
+    if (!res.ok) { setSec({ state: "error", error: res.message }); return; }
+    const sg = suggestCriteria(res.facts, todayLocal(), newId);
+    setSec({ state: "ok", s: sg, applied: apply && sg.criteria.length > 0 });
+    if (apply) applySuggestion(sg);
+  }
+  function applyNow() {
+    if (sec.s) { applySuggestion(sec.s); setSec({ ...sec, applied: true }); return; }
+    setSec({ state: "loading" });
+    loadSec(true);
+  }
+  useEffect(() => {
+    if (!auto) return;
+    let cancelled = false;
+    fetchFacts(initial.ticker).then((res) => {
+      if (cancelled) return;
+      if (!res.ok) { setSec({ state: "error", error: res.message }); return; }
+      const sg = suggestCriteria(res.facts, todayLocal(), newId);
+      setSec({ state: "ok", s: sg, applied: sg.criteria.length > 0 });
+      setC((x) => (x.criteria.length === 0 ? { ...x, criteria: sg.criteria } : x));
+    });
+    return () => { cancelled = true; };
+  }, [auto, initial.ticker]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -85,9 +120,9 @@ export function ThesisForm({ initial, mode, onSubmit, onCancel }: {
       <fieldset>
         <legend className="mb-1 text-[13px] font-bold">2 · Messbare Widerlegungskriterien</legend>
         <p className="mb-2 text-[11px] leading-relaxed text-faint">
-          Wann wäre die These aus deiner Sicht widerlegt? Die automatische Prüfung gegen Geschäftszahlen kommt in einer späteren
-          Etappe. Bis dahin bewertest du die Kriterien bei jeder Prüfung selbst.
+          Wann wäre die These aus deiner Sicht widerlegt? Gespeicherte Kriterien lassen sich später mit „Jetzt prüfen“ gegen die SEC-Zahlen prüfen.
         </p>
+        <SecPrefillBox sec={sec} onApply={applyNow} />
         <ul className="space-y-2">
           {c.criteria.map((k, i) => (
             <li key={k.id} className="rounded-[12px] border border-line p-3">
@@ -178,5 +213,41 @@ export function ThesisForm({ initial, mode, onSubmit, onCancel }: {
         <button type="button" onClick={onCancel} className="h-10 rounded-[10px] border border-line px-4 text-[13px] font-semibold">Abbrechen</button>
       </div>
     </form>
+  );
+}
+
+const METRIC_SHORT: Record<string, string> = { operating_margin: "Operative Marge", fcf_margin: "FCF-Marge", revenue_growth_yoy: "Umsatzwachstum ggü. Vorjahr" };
+const fmt = (n: number) => `${n.toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
+
+/** Aktuelle SEC-Quartalswerte als Startpunkt - Vorschlag, den du vor dem Speichern anpassen kannst. */
+function SecPrefillBox({ sec, onApply }: {
+  sec: { state: "idle" | "loading" | "ok" | "error"; s?: Suggestion; error?: string; applied?: boolean };
+  onApply: () => void;
+}) {
+  return (
+    <div className="mb-3 rounded-[12px] border border-accent/30 bg-accent-soft p-3 text-[12px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold text-accent">SEC-Startwerte</span>
+        {sec.state === "loading" ? <span className="text-muted">lade aktuelle Quartalszahlen …</span> : null}
+        {sec.state === "ok" && sec.applied ? <span className="rounded-[6px] bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-pos">vorbelegt – bitte prüfen</span> : null}
+        <button type="button" onClick={onApply} disabled={sec.state === "loading"}
+          className="ml-auto h-8 rounded-[10px] bg-accent px-3 text-[12px] font-bold text-accent-ink disabled:opacity-50">
+          Aktuelle SEC-Daten als Kriterien übernehmen
+        </button>
+      </div>
+      {sec.state === "ok" && sec.s ? (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {sec.s.basis.map((b) => (
+            <li key={b.metric} className="rounded-[8px] border border-line bg-surface px-2 py-1">
+              {METRIC_SHORT[b.metric]}: <strong className="num">{fmt(b.value)}</strong>
+              <span className="text-faint"> → Schwelle {b.metric === "revenue_growth_yoy" ? "0 %" : `${fmt(Math.round((b.value - SUGGEST_MARGIN_PP) * 10) / 10)} (−${SUGGEST_MARGIN_PP} Pp.)`}{b.stale ? " · Daten veraltet" : ""}</span>
+            </li>
+          ))}
+          {sec.s.missing.map((m) => <li key={m} className="rounded-[8px] border border-dashed border-line px-2 py-1 text-faint">{METRIC_SHORT[m]}: keine Quartalswerte</li>)}
+        </ul>
+      ) : null}
+      {sec.state === "ok" && sec.s?.basis[0] ? <p className="mt-1.5 text-[11px] text-faint">Jüngstes Quartal bis {sec.s.basis[0].periodEnd.split("-").reverse().join(".")} · Quelle: SEC Company Facts · je 2 Quartale in Folge</p> : null}
+      {sec.state === "error" ? <p className="mt-1.5 text-[11px] text-muted">Keine SEC-Startwerte: {sec.error}</p> : null}
+    </div>
   );
 }

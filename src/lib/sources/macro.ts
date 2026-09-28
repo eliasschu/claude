@@ -1,6 +1,6 @@
 import { env, upstream } from "../core/env.ts";
 import { fetchSource, parseJson, parseText, SourceError } from "../core/http.ts";
-import { fail, isStale, ok, type DataMeta, type Result, type SourceId } from "../core/meta.ts";
+import { fail, isStale, ok, type DataMeta, type Result, type SourceId, warnOnce } from "../core/meta.ts";
 import { parseEcbCsv, parseEiaSeries, parseTreasuryXml, type DailyPoint } from "./parsers/macro.ts";
 
 export interface DailySeries { points: DailyPoint[]; unit: string; description: string }
@@ -61,7 +61,10 @@ export async function getUs10y(): Promise<Result<DailySeries>> {
 /** Brent-Spotpreis laut EIA (nur mit kostenlosem Schluessel). */
 export async function getBrent(): Promise<Result<DailySeries>> {
   const key = env.eiaKey();
-  if (!key) return fail("eia", "not_configured", "EIA_API_KEY ist nicht gesetzt.");
+  if (!key) {
+    warnOnce("eia", "EIA_API_KEY ist nicht gesetzt - Rohoelpreis bleibt leer.");
+    return fail("eia", "not_configured", "Energiedaten sind in dieser Installation nicht angebunden.");
+  }
   try {
     const url = `https://api.eia.gov/v2/petroleum/pri/spt/data/?api_key=${encodeURIComponent(key)}&frequency=daily&data[0]=value&facets[series][]=RBRTE&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1400`;
     const res = await fetchSource({ sourceId: "eia", url: upstream(url), revalidate: 3600, parse: parseJson });

@@ -2,9 +2,36 @@ import Link from "next/link";
 import { getInsiderActivity, visibleRows } from "@/lib/services/insider";
 import { STOCK_MOVER_UNIVERSE } from "@/config/movers";
 import { Card, Chip, SectionTitle } from "@/components/ui/primitives";
-import { formatCompact, formatDate } from "@/lib/finance/format";
+import { formatCompact, formatDate, formatNumber } from "@/lib/finance/format";
 
 const MATERIALITY_TONE: Record<string, "pos" | "warn"> = { hoch: "pos", mittel: "warn" };
+
+type Row = Awaited<ReturnType<typeof getInsiderActivity>>["rows"][number];
+
+/** Anteil am zuvor gemeldeten Bestand der Person an dieser Aktie - nicht ihr Gesamtvermoegen. */
+function HoldingShare({ r, compact = false }: { r: Row; compact?: boolean }) {
+  if (r.shareOfHolding === null) return <span className="text-[11px] text-faint">nicht gemeldet</span>;
+  const pct = r.shareOfHolding * 100;
+  // Grosse Anteile: Verkauf rot, Kauf gruen; 10-25 % gelb; darunter neutral
+  const tone = pct >= 25 ? (r.category === "kauf" ? "pos" : "neg") : pct >= 10 ? "warn" : "neutral";
+  const rest = r.sharesAfter !== null && r.price !== null ? r.sharesAfter * r.price : null;
+  const verb = r.category === "kauf" ? "aufgestockt um" : "verkauft";
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <span className="flex items-center gap-1.5">
+        <Chip tone={tone} title="Anteil dieser Transaktion am zuvor gemeldeten Bestand dieser Besitzform (direkt bzw. über Trust/Gesellschaft). Das Gesamtvermögen der Person ist nicht bekannt.">
+          {compact ? "" : `${verb} `}{formatNumber(pct, pct < 10 ? 1 : 0)} %
+        </Chip>
+        <span aria-hidden className="h-1.5 w-12 overflow-hidden rounded-full bg-surface-3">
+          <span className={`block h-full ${tone === "neg" ? "bg-neg" : tone === "pos" ? "bg-pos" : tone === "warn" ? "bg-warn" : "bg-faint"}`} style={{ width: `${Math.min(100, pct)}%` }} />
+        </span>
+      </span>
+      <span className="text-[11px] text-faint">
+        {r.sharesAfter !== null ? `danach ${formatNumber(r.sharesAfter, 0)} Aktien` : ""}{rest !== null ? ` ≈ ${formatCompact(rest, "USD")}` : ""}{r.ownership === "indirekt" ? " · indirekt" : ""}
+      </span>
+    </span>
+  );
+}
 
 /** Nur Aussagekraft mittel und hoch, sortiert danach - Zuteilungen, Ausübungen usw. bleiben aussen vor. */
 export async function DealsOfWeek() {
@@ -33,6 +60,7 @@ export async function DealsOfWeek() {
               <th className="px-2 py-2 font-semibold">Firma</th>
               <th className="px-2 py-2 font-semibold">Volumen &amp; Datum</th>
               <th className="px-2 py-2 font-semibold">Richtung</th>
+              <th className="px-2 py-2 font-semibold" title="Anteil am zuvor gemeldeten Bestand der Person an dieser Aktie">Anteil am Bestand</th>
               <th className="px-2 py-2 font-semibold">Aussagekraft</th>
               <th className="px-2 py-2 font-semibold">Warum es zählt</th>
               <th className="px-4 py-2 font-semibold" />
@@ -40,11 +68,12 @@ export async function DealsOfWeek() {
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="px-4 py-2.5 font-semibold">{r.owner}<span className="block text-[11px] font-normal text-faint">{r.role}</span></td>
-                <td className="px-2 py-2.5"><Link href={`/aktie/${r.ticker}`} className="hover:underline">{r.ticker}</Link></td>
+              <tr key={r.id} className={r.category === "kauf" ? "bg-pos-soft/30" : "bg-neg-soft/20"}>
+                <td className={`border-l-4 px-4 py-2.5 font-semibold ${r.category === "kauf" ? "border-pos" : "border-neg"}`}>{r.owner}<span className="block text-[11px] font-normal text-faint">{r.role}</span></td>
+                <td className="px-2 py-2.5"><Link href={`/aktie/${r.ticker}`} className="num rounded-[6px] bg-accent-soft px-1.5 py-0.5 font-bold text-accent hover:underline">{r.ticker}</Link></td>
                 <td className="num px-2 py-2.5">{formatCompact(r.value, "USD")}<span className="block text-[11px] text-faint">{r.transactionDate ? formatDate(r.transactionDate) : "–"}</span></td>
                 <td className="px-2 py-2.5"><Chip tone={r.category === "kauf" ? "pos" : "neg"}>{r.category === "kauf" ? "▲ Kauf" : "▼ Verkauf"}</Chip></td>
+                <td className="px-2 py-2.5"><HoldingShare r={r} compact /></td>
                 <td className="px-2 py-2.5"><Chip tone={MATERIALITY_TONE[r.materiality]}>{r.materiality}</Chip></td>
                 <td className="max-w-[280px] px-2 py-2.5 text-muted">{r.materialityReason}</td>
                 <td className="px-4 py-2.5"><a href={r.documentUrl} className="underline decoration-dotted underline-offset-2">↗</a></td>
@@ -57,7 +86,7 @@ export async function DealsOfWeek() {
       <ul className="grid gap-2 sm:hidden">
         {rows.map((r) => (
           <li key={r.id}>
-            <Card className="p-3">
+            <Card className={`border-l-4 p-3 ${r.category === "kauf" ? "border-l-pos" : "border-l-neg"}`}>
               <div className="flex items-center gap-1.5">
                 <Chip tone={r.category === "kauf" ? "pos" : "neg"}>{r.category === "kauf" ? "▲ Kauf" : "▼ Verkauf"}</Chip>
                 <Chip tone={MATERIALITY_TONE[r.materiality]}>{r.materiality}</Chip>
@@ -67,6 +96,7 @@ export async function DealsOfWeek() {
               <p className="num text-[12px] text-muted">
                 <Link href={`/aktie/${r.ticker}`} className="hover:underline">{r.ticker}</Link> · {formatCompact(r.value, "USD")}
               </p>
+              <div className="mt-1.5"><HoldingShare r={r} /></div>
               <p className="mt-1.5 text-[12px] leading-relaxed text-muted">{r.materialityReason}</p>
             </Card>
           </li>

@@ -61,3 +61,14 @@ export function isStale(observedAt: string | null, maxAgeMs: number, now = Date.
   const t = Date.parse(observedAt.length === 10 ? `${observedAt}T00:00:00Z` : observedAt);
   return Number.isNaN(t) ? true : now - t > maxAgeMs;
 }
+
+const warned = new Set<string>();
+/**
+ * Konfigurationshinweise (fehlende Schluessel, Variablennamen) gehoeren ins Serverprotokoll, nicht in die Oberflaeche.
+ * Jede Meldung erscheint hoechstens einmal je Prozess.
+ */
+export function warnOnce(key: string, text: string) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[Konfiguration] ${text}`);
+}

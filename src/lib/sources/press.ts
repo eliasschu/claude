@@ -14,7 +14,7 @@ export const PRESS_FEEDS: PressFeed[] = [
 export async function getPressFeed(feed: PressFeed): Promise<Result<{ items: FeedItem[] }>> {
   try {
     const ua = env.secUserAgent();
-    if (feed.sourceId === "sec-press" && !ua) return fail(feed.sourceId, "not_configured", "SEC_EDGAR_USER_AGENT fehlt.");
+    if (feed.sourceId === "sec-press" && !ua) return fail(feed.sourceId, "not_configured", "SEC-Pressemitteilungen sind in dieser Installation nicht eingerichtet.");
     const res = await fetchSource({
       sourceId: feed.sourceId, url: upstream(feed.url),
       headers: feed.sourceId === "sec-press" && ua ? { "User-Agent": ua } : undefined,

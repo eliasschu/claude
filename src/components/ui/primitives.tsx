@@ -195,6 +195,20 @@ export function Hint({ text }: { text: string }) {
   );
 }
 
+/** Erklaerung hinter einem ℹ-Symbol - per Klick oder Antippen, ohne JavaScript (auch auf dem Handy). */
+export function InfoTip({ text, label = "Erklärung" }: { text: string; label?: string }) {
+  return (
+    <details className="group relative inline-block align-middle">
+      <summary aria-label={label} className="flex h-[16px] w-[16px] cursor-pointer list-none items-center justify-center rounded-full border border-line-strong text-[10px] font-bold text-faint hover:text-ink [&::-webkit-details-marker]:hidden">
+        i
+      </summary>
+      <span role="note" className="absolute right-0 z-40 mt-1 block w-[min(260px,80vw)] rounded-[10px] border border-line bg-surface p-2.5 text-[11px] font-normal leading-relaxed text-muted shadow-lg">
+        {text}
+      </span>
+    </details>
+  );
+}
+
 export function SectionTitle({
   children,
   right,

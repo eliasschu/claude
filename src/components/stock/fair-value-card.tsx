@@ -1,6 +1,6 @@
 import type { UiDataMeta } from "@/lib/data/types";
 import type { ValuationView } from "@/lib/services/stock-analysis";
-import { Card, CardBody, CardHeader, Chip, EmptyState, Hint, Meter } from "@/components/ui/primitives";
+import { Card, CardBody, CardHeader, Chip, InfoTip, Meter } from "@/components/ui/primitives";
 import { DataStamp } from "@/components/common/data";
 import { formatNumber, formatPercent, formatPrice } from "@/lib/finance/format";
 import { VERDICT_TEXT } from "@/lib/finance/labels";
@@ -25,7 +25,7 @@ function ScenarioBand({
   currency,
 }: {
   valuation: ValuationView;
-  price: number;
+  price: number | null;
   currency: string;
 }) {
   const values = valuation.scenarios
@@ -33,8 +33,9 @@ function ScenarioBand({
     .filter((v): v is number => v !== null);
   if (values.length === 0) return null;
 
-  const low = Math.min(...values, price);
-  const high = Math.max(...values, price);
+  const refs = price === null ? values : [...values, price];
+  const low = Math.min(...refs);
+  const high = Math.max(...refs);
   const span = high - low || 1;
   const pos = (value: number) => ((value - low) / span) * 100;
 
@@ -48,7 +49,7 @@ function ScenarioBand({
         {/* Spanne zwischen pessimistischem und optimistischem Szenario */}
         {bear !== null && bull !== null ? (
           <div
-            className="absolute top-[34px] h-2 rounded-full bg-accent-soft"
+            className="absolute top-[34px] h-2 rounded-full bg-gradient-to-r from-neg via-warn to-pos opacity-80"
             style={{ left: `${pos(bear)}%`, width: `${Math.max(pos(bull) - pos(bear), 1)}%` }}
           />
         ) : null}
@@ -65,17 +66,19 @@ function ScenarioBand({
           </div>
         ) : null}
 
-        <div className="absolute top-[6px]" style={{ left: `${pos(price)}%` }}>
-          <div className="-translate-x-1/2 text-center">
-            <p className="num whitespace-nowrap text-[11px] font-bold">Kurs {formatNumber(price)}</p>
-            <div className="mx-auto mt-1 h-7 w-[3px] rounded-full bg-ink" />
+        {price !== null ? (
+          <div className="absolute top-[6px]" style={{ left: `${pos(price)}%` }}>
+            <div className="-translate-x-1/2 text-center">
+              <p className="num whitespace-nowrap text-[11px] font-bold">Kurs {formatNumber(price)}</p>
+              <div className="mx-auto mt-1 h-7 w-[3px] rounded-full bg-ink" />
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         {valuation.scenarios.map((scenario) => (
-          <div key={scenario.key} className="rounded-[10px] border border-line px-3 py-2">
+          <div key={scenario.key} className={`rounded-[10px] border px-3 py-2 ${scenario.key === "bear" ? "border-neg/30 bg-neg-soft" : scenario.key === "bull" ? "border-pos/30 bg-pos-soft" : "border-accent/30 bg-accent-soft"}`}>
             <p className="text-[11px] font-semibold text-muted">{scenario.label}</p>
             <p className="num mt-0.5 text-[16px] font-extrabold tracking-[-0.02em]">
               {scenario.perShare === null ? "–" : formatPrice(scenario.perShare, currency)}
@@ -96,27 +99,45 @@ export function FairValueCard({
   price,
   currency,
   meta,
+  anchor,
 }: {
   valuation: ValuationView | null;
-  price: number;
+  /** null = kein Live-Kurs - dann kein Kursvergleich und keine Kursmarke */
+  price: number | null;
   currency: string;
   meta: UiDataMeta;
+  /** Buchwert je Aktie aus der SEC-Bilanz als Bezugsgroesse, wenn kein DCF moeglich ist */
+  anchor?: { bookValuePerShare: number | null; note?: string };
 }) {
   if (!valuation) {
     return (
       <Card>
         <CardHeader title="Modellbewertung" />
         <CardBody>
-          <EmptyState
-            title="Keine verlässlichen Daten verfügbar"
-            hint="Für dieses Wertpapier liegen keine Eingangsgrößen für eine Bewertung vor."
-          />
+          {anchor?.bookValuePerShare != null ? (
+            <div className="rounded-[12px] border border-accent/30 bg-accent-soft p-4">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                Buchwert je Aktie (SEC-Bilanz)
+                <InfoTip text={`Eigenkapital ÷ verwässerte Aktienanzahl laut letztem Jahresabschluss. Enthält Goodwill und immaterielle Werte (kein materieller Buchwert). ${anchor.note ?? ""}`} />
+              </p>
+              <p className="num mt-1 text-[26px] font-extrabold text-accent">{formatPrice(anchor.bookValuePerShare, currency)}</p>
+              {price !== null ? (
+                <p className="num mt-1 text-[12px] text-muted">Kurs-Buchwert-Verhältnis {formatNumber(price / anchor.bookValuePerShare, 2)}</p>
+              ) : null}
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-muted">
+                <Chip tone="neutral">kein DCF</Chip> Cashflow-Modell für dieses Geschäftsmodell nicht aussagekräftig
+                {anchor.note ? <InfoTip text={anchor.note} /> : null}
+              </p>
+            </div>
+          ) : (
+            <p className="flex items-center gap-1.5 text-[13px] text-muted"><Chip tone="neutral">keine Modellbewertung</Chip> Eingangsgrößen fehlen im Jahresabschluss.</p>
+          )}
         </CardBody>
       </Card>
     );
   }
 
-  const deviation = valuation.deviationPct;
+  const deviation = price === null ? null : valuation.deviationPct;
   const direction = deviation === null ? null : deviation > 0 ? "unter" : "über";
 
   return (
@@ -125,17 +146,14 @@ export function FairValueCard({
         title={
           <span className="flex items-center gap-2">
             Modellbewertung
-            <Hint text="Eigene Berechnung aus mehreren Bewertungsverfahren. Keine Analystenschätzung, keine Anlageberatung." />
+            <InfoTip text="Eigene Berechnung (zweiphasiger DCF auf Basis des normalisierten freien Cashflows) mit offengelegten Annahmen, bewusst als Spanne. Keine Analystenschätzung, keine Anlageberatung." />
           </span>
         }
-        description="Modellschätzung mit offengelegten Annahmen – bewusst als Spanne, nicht als Einzelwert."
       />
 
       <CardBody>
         <div className="rounded-[12px] bg-surface-2 p-4">
-          {deviation === null ? (
-            <p className="text-[15px] font-semibold">Keine verlässliche Modellbewertung möglich.</p>
-          ) : (
+          {deviation !== null ? (
             <>
               <p className="max-w-[52ch] text-[17px] font-bold leading-snug tracking-[-0.01em] sm:text-[19px]">
                 Nach unserem Modell liegt die Aktie etwa{" "}
@@ -152,15 +170,32 @@ export function FairValueCard({
                 </span>
               </div>
             </>
+          ) : valuation.aggregate.value !== null ? (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Fairer Wert laut Modell</p>
+              <p className="num text-[26px] font-extrabold text-accent">{formatPrice(valuation.aggregate.value, currency)}</p>
+              <p className="num mt-0.5 flex items-center gap-1.5 text-[12px] text-muted">
+                Spanne {formatPrice(valuation.aggregate.low, currency)} bis {formatPrice(valuation.aggregate.high, currency)}
+                <Chip tone="neutral">ohne Kursvergleich</Chip>
+              </p>
+            </>
+          ) : (
+            <p className="text-[15px] font-semibold">Keine verlässliche Modellbewertung möglich.</p>
           )}
 
-          <div className="mt-4 flex items-center gap-3">
-            <span className="text-[11px] font-semibold text-muted">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-muted">
               Konfidenz
-              <Hint text="Steigt mit der Zahl der nutzbaren Verfahren und sinkt, wenn deren Ergebnisse weit auseinanderliegen." />
+              <InfoTip text="Steigt mit der Zahl der nutzbaren Verfahren und sinkt, wenn deren Ergebnisse weit auseinanderliegen." />
             </span>
             <Meter value={valuation.aggregate.confidence} className="max-w-[220px]" label="Konfidenz der Bewertung" />
             <span className="num text-[12px] font-bold">{valuation.aggregate.confidence}/100</span>
+            {valuation.terminalShare !== null ? (
+              <span className="flex items-center gap-1">
+                <Chip tone={valuation.terminalShare > 0.75 ? "warn" : "neutral"}>Endwert-Anteil {(valuation.terminalShare * 100).toFixed(0)} %</Chip>
+                <InfoTip text="Anteil des Unternehmenswerts, der im DCF auf den Endwert entfällt. Je höher, desto stärker hängt das Ergebnis an Annahmen weit in der Zukunft." />
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -192,14 +227,6 @@ export function FairValueCard({
           </table>
         </div>
 
-        {valuation.terminalShare !== null ? (
-          <p className="mt-3 text-[12px] leading-relaxed text-muted">
-            Im Discounted-Cashflow-Modell entfallen{" "}
-            <span className="num font-semibold text-ink">{(valuation.terminalShare * 100).toFixed(0)} %</span> des
-            Unternehmenswerts auf den Endwert. Je höher dieser Anteil, desto stärker hängt das Ergebnis an
-            Annahmen weit in der Zukunft.
-          </p>
-        ) : null}
 
         <details className="mt-4 rounded-[10px] border border-line">
           <summary className="cursor-pointer px-3 py-2 text-[12px] font-semibold">
@@ -226,11 +253,11 @@ export function FairValueCard({
                         (c) => c.discountRate === rate && c.growth === g,
                       );
                       const value = cell?.perShare ?? null;
-                      const above = value !== null && value > price;
+                      const cls = value === null ? "text-faint" : price === null ? "" : value > price ? "text-pos" : "text-neg";
                       return (
                         <td
                           key={g}
-                          className={`num px-2 py-1.5 text-right ${above ? "text-pos" : value === null ? "text-faint" : "text-neg"}`}
+                          className={`num px-2 py-1.5 text-right ${cls}`}
                         >
                           {value === null ? "–" : formatNumber(value, 0)}
                         </td>
@@ -241,8 +268,7 @@ export function FairValueCard({
               </tbody>
             </table>
             <p className="mt-2 text-[11px] leading-relaxed text-faint">
-              Werte über dem aktuellen Kurs sind grün, Werte darunter rot. Die Tabelle zeigt, wie stark das Ergebnis
-              von zwei Annahmen abhängt.
+              {price !== null ? "Grün = über dem aktuellen Kurs, rot = darunter." : "Ohne Live-Kurs keine Farbmarkierung."}
             </p>
           </div>
         </details>

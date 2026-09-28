@@ -10,7 +10,7 @@ import { cagr } from "./valuation.ts";
 export type FinKey =
   | "revenue" | "operatingIncome" | "netIncome" | "operatingCashFlow" | "capex"
   | "cash" | "debtTotal" | "debtNoncurrent" | "debtCurrent" | "equity"
-  | "epsDiluted" | "dilutedShares" | "dividendsPaid" | "buybacks";
+  | "epsDiluted" | "dilutedShares" | "dividendsPaid" | "buybacks" | "assets";
 
 export interface ConceptSpec {
   key: FinKey;
@@ -36,6 +36,7 @@ export const CONCEPTS: ConceptSpec[] = [
   { key: "dilutedShares", kind: "duration", unit: "shares", usGaap: ["WeightedAverageNumberOfDilutedSharesOutstanding"], ifrs: ["AdjustedWeightedAverageShares"] },
   { key: "dividendsPaid", kind: "duration", unit: "money", usGaap: ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"], ifrs: ["DividendsPaidClassifiedAsFinancingActivities"] },
   { key: "buybacks", kind: "duration", unit: "money", usGaap: ["PaymentsForRepurchaseOfCommonStock"], ifrs: [] },
+  { key: "assets", kind: "instant", unit: "money", usGaap: ["Assets"], ifrs: ["Assets"] },
 ];
 
 export const LABELS: Record<FinKey, string> = {
@@ -44,7 +45,7 @@ export const LABELS: Record<FinKey, string> = {
   cash: "Zahlungsmittel", debtTotal: "Finanzschulden", debtNoncurrent: "Langfristige Finanzschulden",
   debtCurrent: "Kurzfristiger Anteil der Finanzschulden", equity: "Eigenkapital",
   epsDiluted: "Verwässertes Ergebnis je Aktie", dilutedShares: "Verwässerte Aktienanzahl",
-  dividendsPaid: "Gezahlte Dividenden", buybacks: "Aktienrückkäufe",
+  dividendsPaid: "Gezahlte Dividenden", buybacks: "Aktienrückkäufe", assets: "Bilanzsumme",
 };
 
 export interface FinancialYear {
@@ -53,7 +54,7 @@ export interface FinancialYear {
   operatingCashFlow: number | null; capex: number | null; freeCashFlow: number | null;
   cash: number | null; debt: number | null; debtIncomplete: boolean;
   equity: number | null; epsDiluted: number | null; dilutedShares: number | null;
-  dividendsPaid: number | null; buybacks: number | null;
+  dividendsPaid: number | null; buybacks: number | null; assets: number | null;
   filed: string | null; form: string | null; accession: string | null;
 }
 
@@ -111,7 +112,7 @@ export function buildFinancials(
       freeCashFlow: ocf !== null && capex !== null ? ocf - Math.abs(capex) : null,
       cash: get("cash"), debt, debtIncomplete, equity: get("equity"),
       epsDiluted: get("epsDiluted"), dilutedShares: get("dilutedShares"),
-      dividendsPaid: get("dividendsPaid"), buybacks: get("buybacks"),
+      dividendsPaid: get("dividendsPaid"), buybacks: get("buybacks"), assets: get("assets"),
       filed: src?.filed ?? null, form: src?.form ?? null, accession: src?.accession ?? null,
     };
   });
@@ -130,6 +131,12 @@ export interface FinancialMetrics {
   shareCountChange: number | null; shareCountYears: number;
   fcfPositiveYears: number; yearsWithFcf: number; negativeEquity: boolean;
   equityPerShare: number | null;
+  /** Jahresueberschuss ÷ Bilanzsumme (Gesamtkapitalrendite). */
+  roa: number | null;
+  /** Eigenkapital ÷ Bilanzsumme. */
+  equityRatio: number | null;
+  /** Operatives Ergebnis ÷ (Finanzschulden + Eigenkapital), vor Steuern; nur bei positivem eingesetztem Kapital. */
+  roic: number | null;
   /** Ausschuettung und Rueckkauf im Verhaeltnis zum freien Cashflow. */
   payoutOfFcf: number | null;
 }
@@ -170,6 +177,10 @@ export function financialMetrics(f: CompanyFinancials): FinancialMetrics {
     yearsWithFcf: y.filter((v) => v.freeCashFlow !== null).length,
     negativeEquity: last?.equity != null && last.equity < 0,
     equityPerShare: ratio(last?.equity, last?.dilutedShares),
+    roa: last?.assets != null && last.assets > 0 && last.netIncome != null ? last.netIncome / last.assets : null,
+    equityRatio: last?.assets != null && last.assets > 0 && last.equity != null ? last.equity / last.assets : null,
+    roic: last?.operatingIncome != null && last.debt != null && last.equity != null && last.debt + last.equity > 0
+      ? last.operatingIncome / (last.debt + last.equity) : null,
     payoutOfFcf: payout,
   };
 }

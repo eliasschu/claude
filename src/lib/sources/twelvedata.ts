@@ -1,6 +1,6 @@
 import { env, upstream } from "../core/env.ts";
 import { fetchSource, SourceError } from "../core/http.ts";
-import { fail, isStale, ok, type DataMeta, type Result } from "../core/meta.ts";
+import { fail, isStale, ok, type DataMeta, type Result, warnOnce } from "../core/meta.ts";
 import { normalizeQuote, normalizeTimeSeries, readProviderError, type SeriesPoint, type StockQuote } from "./parsers/twelvedata.ts";
 
 const BASE = "https://api.twelvedata.com";
@@ -31,7 +31,9 @@ function meta(fetchedAt: string, observedAt: string | null, stale: boolean, stal
 
 function keyOrFail<T>(): { key: string } | { failure: Result<T> } {
   const key = env.twelveDataKey();
-  return key ? { key } : { failure: fail("twelvedata", "not_configured", "TWELVEDATA_API_KEY ist nicht gesetzt. Für Aktienkurse bitte einen kostenlosen Schlüssel eintragen.") };
+  if (key) return { key };
+  warnOnce("twelvedata", "TWELVEDATA_API_KEY ist nicht gesetzt - Aktienkurse bleiben leer.");
+  return { failure: fail("twelvedata", "not_configured", "Live-Kurse sind in dieser Installation nicht angebunden.") };
 }
 
 // Gratistarif: 8 Abrufe je Minute -> mindestens 7,5 Sekunden Abstand.

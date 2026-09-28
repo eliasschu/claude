@@ -403,3 +403,32 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - Einheiten und Vorzeichen;
   - Lücken und abweichende Geschäftsjahre.
 
+## 12. Aktienseite, Scorecard und Deals (nach Etappe D)
+
+- **Oberfläche ohne Entwicklermeldungen:** Fehlende Schlüssel stehen nur noch im Serverprotokoll (`warnOnce`). Die Oberfläche zeigt stattdessen Klartext, etwa „Live-Kurse sind in dieser Installation nicht angebunden“. Die Aktienseite zeigt ohne Kurs das Badge „Analyse-Modus: SEC-EDGAR-Fundamentaldaten (Stand …)“.
+- **Fehler behoben:** Ohne Kurs wurde der Bewertungskarte der Kurs 0 übergeben, daher die Anzeige „Kurs 0,00“. Jetzt gibt es in diesem Fall keine Kursmarke, keinen Kursvergleich und keine Farbmarkierung in der Sensitivität. Stattdessen zeigt die Karte den fairen Wert laut Modell mit Spanne.
+- **Scorecard-Ersatzkennzahlen** (nur aus SEC-Jahreszahlen):
+  - **Negatives Eigenkapital:** Kapitalrendite statt Eigenkapitalrendite. Formel: operatives Ergebnis ÷ (Finanzschulden + Eigenkapital), vor Steuern. Ist das eingesetzte Kapital ≤ 0, gibt es keinen Wert.
+  - **Banken/Finanzen:** Die Profitabilität ergibt sich aus der Eigenkapitalrendite (0–20 %) und der Gesamtkapitalrendite (0–1,5 %). Die Bilanz wird über die Eigenkapitalquote bewertet (4 % → 0, 12 % → 100).
+  - **Immobilien:** Die Bilanz wird über die Eigenkapitalquote bewertet (20 % → 0, 60 % → 100).
+  - **Neues SEC-Konzept:** `Assets` (Bilanzsumme).
+  - **Fundamental-Score:** Er setzt sich aus Wachstum, Profitabilität und Bilanz zusammen, wenn mindestens zwei davon belegt sind. Er erscheint auch ohne Kurse und ist klar als Fundamental-Score beschriftet.
+- **Nicht erzwungen:** Bewertung, Momentum und Stabilität brauchen Kurse, Analystenrevisionen einen lizenzierten Datensatz. Diese Kacheln bleiben grau mit kurzem Hinweis. Werte werden dafür nicht erfunden.
+  - CET1-Quote und materieller Buchwert stehen nicht verlässlich in den SEC-XBRL-Standarddaten.
+  - Als Bezugsgröße zeigt die Karte bei Finanzwerten den Buchwert je Aktie, ausdrücklich einschließlich Goodwill.
+- **Darstellung:**
+  - Die Scorecard ist ein 7-Kachel-Raster: Grün ab 70, Gelb 40–69, Rot unter 40, Grau ohne Daten.
+  - Die Bewertung zeigt die Spanne als Farbbalken.
+  - Methoden und Erklärungen stehen hinter ℹ (per Klick oder Antippen, auch mobil).
+- **Thesen-Formular:** Bei einer neuen These werden die jüngsten SEC-Quartalswerte automatisch geladen und als Kriterien vorbelegt. Nur das Börsenkürzel geht an den Server. Vorbelegt werden:
+  - Operative Marge unter aktuellem Wert −5 Prozentpunkte;
+  - FCF-Marge unter aktuellem Wert −5 Prozentpunkte;
+  - Umsatzwachstum unter 0 %;
+  - jeweils zwei Quartale in Folge.
+  Mit „Aktuelle SEC-Daten als Kriterien übernehmen“ lässt sich die Vorbelegung jederzeit erneut einsetzen. Gespeichert wird erst beim Klick auf „These speichern“.
+- **Deals der Woche:**
+  - Neue Spalte „Anteil am Bestand“: Anteil der Transaktion am zuvor gemeldeten Bestand dieser Besitzform, mit Balken. Farben: Verkauf ab 25 % rot, Kauf ab 25 % grün, 10–25 % gelb.
+  - Dazu kommen der Restbestand in Aktien und dessen ungefährer Wert zum Transaktionspreis.
+  - Das Gesamtvermögen der Person steht nicht in Form 4 und wird nicht angezeigt.
+- **Geprüft:** Das Verhalten ist nur mit fiktiven Mock-Daten geprüft (Tech-Firma und Bank), auf Smartphone und Desktop. Der Echtdatenlauf auf dem Mac steht aus.
+

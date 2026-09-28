@@ -1,13 +1,16 @@
 import { env, upstream } from "../core/env.ts";
 import { fetchSource, parseJson, parseText, SourceError } from "../core/http.ts";
-import { fail, ok, type DataMeta, type Result } from "../core/meta.ts";
+import { fail, ok, type DataMeta, type Result, warnOnce } from "../core/meta.ts";
 import { filingUrls, normalizeSubmissions, normalizeTickerIndex, padCik, parseForm4, type ConceptFact, type Form4, type SecCompany, type SecListing } from "./parsers/sec.ts";
 import { normalizeCompanyFacts, type CompanyFactsJson, type NormalizedFacts } from "../finance/sec-facts.ts";
 import { findInfoTableFile, parse13FInfoTable, parseEdgarIndexJson, type ThirteenFHolding } from "./parsers/sec-13f.ts";
 
 function headers(): Record<string, string> {
   const ua = env.secUserAgent();
-  if (!ua) throw new SourceError("sec", "not_configured", "SEC_EDGAR_USER_AGENT fehlt. Die SEC verlangt Name und E-Mail-Adresse.");
+  if (!ua) {
+    warnOnce("sec", "SEC_EDGAR_USER_AGENT fehlt - die SEC verlangt Name und E-Mail-Adresse.");
+    throw new SourceError("sec", "not_configured", "SEC-Daten sind in dieser Installation nicht eingerichtet.");
+  }
   return { "User-Agent": ua };
 }
 
