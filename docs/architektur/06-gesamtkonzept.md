@@ -432,3 +432,23 @@ Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Er
   - Das Gesamtvermögen der Person steht nicht in Form 4 und wird nicht angezeigt.
 - **Geprüft:** Das Verhalten ist nur mit fiktiven Mock-Daten geprüft (Tech-Firma und Bank), auf Smartphone und Desktop. Der Echtdatenlauf auf dem Mac steht aus.
 
+## 13. Aktienseite: Quartalszahlen und Insider (12 Monate)
+
+- **Quartalszahlen** (Abschnitt `#quartale`), nur aus SEC Company Facts:
+  - die letzten fünf Einzelquartale mit Umsatz, operativem Ergebnis, Marge, Nettoergebnis, Ergebnis je Aktie, operativem Cashflow, Investitionen und FCF;
+  - Veränderung gegenüber dem Vorjahresquartal, nur bei gleichem Konzept und einer Basis über 0;
+  - 12-Monats-Summen nur, wenn vier lückenlose Quartale vorliegen;
+  - Ergebnis je Aktie nur, wenn direkt gemeldet, nie aus Jahreswerten abgeleitet;
+  - Δ markiert abgeleitete Werte, R später angepasste; jede Spalte verlinkt ihren Bericht.
+- **Insider (12 Monate)** (Abschnitt `#insider`), nur aus Form 4 (höchstens die 60 neuesten Meldungen):
+  - Summen für Verkäufe, Plananteil (10b5-1), Käufe, Zuteilungen und Steuereinbehalte;
+  - Tabelle mit Person, Datum, Meldeverzug, Aktion mit Plan-Badge, Stück × Preis, Wert, Anteil am Bestand und Link.
+- **Nicht übernommen:** Eine vom Nutzer eingefügte „Deep Research“-Analyse zu MSFT wurde nicht als Daten übernommen, auch nicht als Demo.
+  - Sie enthält nachweislich falsche Werte. Beispiel: Umsatz Q1 FY2026 dort 65,59 Mrd. $, gemeldet wurden rund 77,7 Mrd. $.
+  - Kursziele und Einstufungen sind namentlich Banken zugeschrieben, ohne lizenzierte Quelle.
+  - Kennzahlen, die Kurse brauchen (KGV, KUV, PEG), und Analystenkonsens bleiben offen, bis eine lizenzierte Quelle angebunden ist.
+- **Behoben:**
+  - Unsichtbare Hilfstexte in Tabellen verursachten auf dem Handy seitliches Scrollen.
+  - 13F-Zeilen werden je CUSIP addiert, Optionen nicht als Bestand gezählt.
+  - Große SEC-Antworten (über 2 MB) liegen im Prozessspeicher statt im Next-Datencache.
+

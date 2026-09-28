@@ -14,6 +14,10 @@ import { formatDate, formatNumber, formatPrice } from "@/lib/finance/format";
 import { SmartSearch } from "@/components/layout/smart-search";
 import { StockUnavailable } from "@/components/stock/stock-unavailable";
 import { ThesisPanel } from "@/components/thesis/thesis-panel";
+import { Suspense } from "react";
+import { QuarterlySection } from "@/components/stock/quarterly-section";
+import { InsiderSection } from "@/components/stock/insider-section";
+import { PanelSkeleton } from "@/components/home/skeletons";
 
 export const dynamicParams = true;
 // Spaetestens alle 15 Minuten neu erzeugen - auch eine beim Build ausgefallene Quelle bleibt so nicht dauerhaft im Cache.
@@ -33,8 +37,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 const SECTIONS = [
   { href: "#these", label: "Meine These" },
+  { href: "#quartale", label: "Quartale" },
   { href: "#bewertung", label: "Bewertung" },
   { href: "#scorecard", label: "Scorecard" },
+  { href: "#insider", label: "Insider" },
   { href: "#meldungen", label: "Meldungen" },
 ];
 
@@ -124,6 +130,10 @@ export default async function StockPage({ params }: Params) {
         <ThesisPanel ticker={listing.ticker} companyName={company.name} />
       </section>
 
+      <div id="quartale" className="scroll-mt-32">
+        <Suspense fallback={<PanelSkeleton />}><QuarterlySection cik={listing.cik} /></Suspense>
+      </div>
+
       <div id="bewertung" className="scroll-mt-32">
         <FairValueCard valuation={valuation} price={quote?.price ?? null} currency={quote?.currency ?? model.currency ?? "USD"} meta={factsUiMeta}
           anchor={{ bookValuePerShare: metrics.equityPerShare, note: model.profile.dcfNote }} />
@@ -131,6 +141,10 @@ export default async function StockPage({ params }: Params) {
 
       <div id="scorecard" className="scroll-mt-32">
         <ScorecardCard card={scorecard} meta={factsUiMeta} />
+      </div>
+
+      <div id="insider" className="scroll-mt-32">
+        <Suspense fallback={<PanelSkeleton />}><InsiderSection ticker={listing.ticker} /></Suspense>
       </div>
 
       <div id="meldungen" className="scroll-mt-32">

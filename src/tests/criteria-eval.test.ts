@@ -344,3 +344,19 @@ describe("Kriterien-Vorschläge aus SEC-Daten", async () => {
     assert.deepEqual(s.missing, ["fcf_margin"], "ohne Cashflow-Daten kein FCF-Vorschlag");
   });
 });
+
+describe("Quartalsübersicht", async () => {
+  const { quarterlyOverview } = await import("../lib/finance/quarterly.ts");
+  test("Einzelquartale, Vorjahreswachstum, TTM nur bei vier lückenlosen Quartalen, EPS nur direkt", () => {
+    const eps = (vals: number[]) => vals.map((v, i) => ({ ...f(Q[i][0], Q[i][1], v, Q[i][2]) }));
+    const raw = company({ [REV]: quarters([100, 100, 100, 100, 110, 120]), [OI]: quarters([20, 20, 20, 20, 22, 30]) });
+    raw.facts!["us-gaap"].EarningsPerShareDiluted = { units: { "USD/shares": eps([1, 1, 1, 1, 1.1, 1.2]).filter((_, i) => i !== 3) } };
+    const o = quarterlyOverview(normalizeCompanyFacts(raw), 5);
+    assert.equal(o.rows[0].end, "2026-06-30");
+    assert.equal(o.rows[0].operatingMarginPct, 25);
+    assert.equal(Math.round(o.rows[0].cells.revenue!.yoyPct!), 20);
+    assert.equal(o.rows[2].cells.epsDiluted, undefined, "Q4-EPS nicht aus Jahreswert abgeleitet");
+    assert.equal(o.ttm?.revenue, 430);
+    assert.equal(o.rows[0].freeCashFlow, null, "ohne Cashflow-Daten kein FCF");
+  });
+});

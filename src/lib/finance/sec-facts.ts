@@ -17,7 +17,7 @@ export interface RawFact { start?: string; end: string; val: number; accn: strin
 export interface RawConcept { units?: Record<string, RawFact[]> }
 export interface CompanyFactsJson { cik?: number | string; entityName?: string; facts?: Record<string, Record<string, RawConcept>> }
 
-export type Quantity = "revenue" | "operatingIncome" | "operatingCashFlow" | "capex";
+export type Quantity = "revenue" | "operatingIncome" | "operatingCashFlow" | "capex" | "netIncome" | "epsDiluted";
 
 /** Konzeptvorrang je Groesse (US-GAAP, dann IFRS). */
 export const CONCEPTS: Record<Quantity, { taxonomy: "us-gaap" | "ifrs-full"; tag: string }[]> = {
@@ -39,11 +39,22 @@ export const CONCEPTS: Record<Quantity, { taxonomy: "us-gaap" | "ifrs-full"; tag
     { taxonomy: "us-gaap", tag: "PaymentsToAcquirePropertyPlantAndEquipment" },
     { taxonomy: "ifrs-full", tag: "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities" },
   ],
+  netIncome: [
+    { taxonomy: "us-gaap", tag: "NetIncomeLoss" },
+    { taxonomy: "ifrs-full", tag: "ProfitLossAttributableToOwnersOfParent" },
+  ],
+  epsDiluted: [
+    { taxonomy: "us-gaap", tag: "EarningsPerShareDiluted" },
+    { taxonomy: "ifrs-full", tag: "DilutedEarningsLossPerShare" },
+  ],
 };
+
+/** Je-Aktie-Groessen: nie aus kumulierten Werten ableiten (die Aktienanzahl aendert sich je Periode). */
+const PER_SHARE: ReadonlySet<Quantity> = new Set(["epsDiluted"]);
 
 export const QUANTITY_LABEL: Record<Quantity, string> = {
   revenue: "Umsatz", operatingIncome: "Operatives Ergebnis", operatingCashFlow: "Operativer Cashflow",
-  capex: "Investitionen in Sachanlagen",
+  capex: "Investitionen in Sachanlagen", netIncome: "Nettoergebnis", epsDiluted: "Ergebnis je Aktie (verwässert)",
 };
 
 export interface SourceRef { accn: string; form: string; filed: string }
@@ -154,9 +165,11 @@ export function normalizeCompanyFacts(json: CompanyFactsJson): NormalizedFacts {
       const units = json.facts?.[taxonomy]?.[tag]?.units;
       if (!units) continue;
       for (const [unit, facts] of Object.entries(units)) {
-        if (!isCurrency(unit)) { unsupportedUnits.add(unit); continue; }
+        const okUnit = PER_SHARE.has(q) ? /^[A-Z]{3}\/shares$/.test(unit) : isCurrency(unit);
+        if (!okUnit) { unsupportedUnits.add(unit); continue; }
         const values = latestPerPeriod(q, `${taxonomy}:${tag}`, unit, facts ?? []);
-        for (const v of quartersFrom(values)) {
+        const qs = PER_SHARE.has(q) ? values.filter((v) => spanOf(v.start, v.end) === "q") : quartersFrom(values);
+        for (const v of qs) {
           const k = `${v.start}|${v.end}`;
           if (!quarters.has(k)) quarters.set(k, v);
         }
