@@ -60,7 +60,9 @@ export function BotMessageCard({ message: m, variant = "compact", headingLevel =
           <dd className="num mt-0.5 font-semibold">{formatDate(m.publishedAt)}</dd>
         </div>
         <div>
-          <dt className="text-faint" title="Zeitpunkt des Datenabrufs, bei dem die Meldung vorlag">Vom Bot erkannt</dt>
+          <dt className="text-faint" title={m.origin === "archiv" ? "Erster Erkennungszeitpunkt, im Archiv unveränderlich gespeichert" : "Zeitpunkt des Datenabrufs, bei dem die Meldung vorlag"}>
+            {m.origin === "archiv" ? "Vom Bot erkannt" : "Abgerufen"}
+          </dt>
           <dd className="num mt-0.5 font-semibold">{m.detectedAt ? formatDateTime(m.detectedAt) : "nicht belegt"}</dd>
         </div>
       </dl>

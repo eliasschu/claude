@@ -36,8 +36,9 @@ export interface BotMessage {
   tradedTo: string | null;
   /** Veroeffentlichung bei der SEC (Tagesgenauigkeit). */
   publishedAt: string;
-  /** Zeitpunkt des Datenabrufs, bei dem der Bot die Meldung vorliegen hatte. */
+  /** archiv: erster Erkennungszeitpunkt aus dem unveraenderlichen Meldungsarchiv. live: Zeitpunkt des Datenabrufs dieser Seite. */
   detectedAt: string | null;
+  origin: "archiv" | "live";
   value: number | null;
   sources: { label: string; url: string }[];
   /** Offengelegter Auswahlgrund, keine Wahrscheinlichkeit. */
@@ -99,7 +100,7 @@ function clusterMessage(c: InsiderCluster, rows: InsiderRow[], detectedAt: strin
     title: `${c.owners.length} Insider von ${c.issuerName} kaufen innerhalb von ${span + 1} ${span === 0 ? "Tag" : "Tagen"}${value !== null ? ` für zusammen ${money(value)}` : ""}`,
     relevance: `Käufe am offenen Markt durch ${c.owners.join(", ")}.${noPlan ? " Keine der Meldungen verweist auf einen vorab festgelegten Plan." : ""} Mehrere Personen mit Einblick in dasselbe Unternehmen setzen eigenes Geld ein.`,
     uncertainty: UNCERTAINTY.cluster,
-    tradedFrom: from, tradedTo: to, publishedAt, detectedAt, value,
+    tradedFrom: from, tradedTo: to, publishedAt, detectedAt, origin: "live", value,
     sources: uniqueSources(rows),
     selection: `Mehrere Insider (${c.owners.length}) mit Käufen innerhalb von 14 Tagen.`,
   };
@@ -124,7 +125,7 @@ function singleMessage(rows: InsiderRow[], detectedAt: string | null): BotMessag
     title: `${first.owner} (${first.role}) ${buy ? "kauft" : "verkauft"} ${first.ticker}-Aktien${value !== null ? ` für ${money(value)}` : ""}`,
     relevance: relevanceParts.join(" "),
     uncertainty: (buy ? UNCERTAINTY.buy : UNCERTAINTY.sale) + (planUnknown ? UNCERTAINTY.planUnknown : ""),
-    tradedFrom: from, tradedTo: to, publishedAt, detectedAt, value,
+    tradedFrom: from, tradedTo: to, publishedAt, detectedAt, origin: "live", value,
     sources: uniqueSources(rows),
     selection: `Aussagekraft ${first.materiality} nach den Insider-Regeln.`,
   };
@@ -166,10 +167,40 @@ export function selectBotMessages(activity: Pick<InsiderResult, "rows" | "cluste
   }
   for (const rows of groups.values()) messages.push(singleMessage(rows, activity.fetchedAt));
 
-  return messages
+  return rankMessages(messages, limit);
+}
+
+/** Rangfolge: Art (Cluster > Kauf > Verkauf), dann Betrag, dann Veroeffentlichung. */
+export function rankMessages(messages: BotMessage[], limit = FEED_RULES.limit): BotMessage[] {
+  return [...messages]
     .sort((a, b) =>
       FEED_RULES.kindRank[b.kind] - FEED_RULES.kindRank[a.kind]
       || (b.value ?? 0) - (a.value ?? 0)
       || b.publishedAt.localeCompare(a.publishedAt))
     .slice(0, limit);
+}
+
+/** Eine Zeile aus dem Meldungsarchiv der Bot-API (GET /messages). */
+export interface ArchivedMessage {
+  message_id: string; kind: BotMessageKind; ticker: string | null; issuer_cik: string; issuer_name: string | null;
+  title: string; relevance: string; uncertainty: string; counter_arguments: string[];
+  sources: { label: string; url: string }[]; selection: string; value_usd: number | null;
+  traded_from: string | null; traded_to: string | null; published_at: string; detected_at: string;
+}
+
+/**
+ * Meldungen aus dem Archiv: dieselben Auswahlregeln (Alter nach Veroeffentlichung, Rangfolge, Limit),
+ * aber mit festem, erstem Erkennungszeitpunkt.
+ */
+export function fromArchive(rows: ArchivedMessage[], now = new Date(), limit = FEED_RULES.limit): BotMessage[] {
+  const cutoff = now.getTime() - FEED_RULES.maxAgeDays * 86400000;
+  const known = new Set<BotMessageKind>(["insider_cluster", "insider_buy", "insider_sale"]);
+  return rankMessages(rows
+    .filter((r) => known.has(r.kind) && Date.parse(r.published_at) >= cutoff)
+    .map((r) => ({
+      id: r.message_id, kind: r.kind, ticker: r.ticker ?? r.issuer_cik, issuerName: r.issuer_name ?? `CIK ${r.issuer_cik}`,
+      title: r.title, relevance: r.relevance, uncertainty: r.uncertainty,
+      tradedFrom: r.traded_from, tradedTo: r.traded_to, publishedAt: r.published_at, detectedAt: r.detected_at,
+      origin: "archiv" as const, value: r.value_usd, sources: r.sources, selection: r.selection,
+    })), limit);
 }

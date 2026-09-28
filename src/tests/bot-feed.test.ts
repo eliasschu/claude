@@ -133,3 +133,23 @@ describe("Aktiensuche", () => {
     assert.equal(r.issues.length, 1);
   });
 });
+
+describe("Meldungsarchiv der Bot-API", () => {
+  const base = {
+    issuer_cik: "42", issuer_name: "Test Corp", relevance: "r", uncertainty: "u", counter_arguments: [],
+    sources: [{ label: "SEC Form 4", url: "https://www.sec.gov/x/" }], selection: "s", traded_from: "2026-09-20", traded_to: "2026-09-20",
+  };
+  const now = new Date("2026-09-28T12:00:00Z");
+
+  test("gleiche Regeln wie live, aber fester Erkennungszeitpunkt aus dem Archiv", async () => {
+    const { fromArchive } = await import("../lib/services/bot-feed.ts");
+    const out = fromArchive([
+      { ...base, message_id: "a", kind: "insider_sale", ticker: "AAA", title: "Verkauf", value_usd: 9e6, published_at: "2026-09-25T21:00:00Z", detected_at: "2026-09-25T21:30:00Z" },
+      { ...base, message_id: "b", kind: "insider_cluster", ticker: "BBB", title: "Cluster", value_usd: 1e4, published_at: "2026-09-24T21:00:00Z", detected_at: "2026-09-24T21:30:00Z" },
+      { ...base, message_id: "c", kind: "insider_buy", ticker: "CCC", title: "zu alt", value_usd: 1e7, published_at: "2026-09-01T21:00:00Z", detected_at: "2026-09-01T21:30:00Z" },
+    ], now);
+    assert.deepEqual(out.map((m) => m.id), ["b", "a"]);
+    assert.equal(out[0].origin, "archiv");
+    assert.equal(out[0].detectedAt, "2026-09-24T21:30:00Z");
+  });
+});

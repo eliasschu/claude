@@ -94,3 +94,42 @@ Stand: 28.09.2026. Aktienanalysen, Insiderdaten, Prognosemärkte und Nachrichten
 - Die Aktienseite ist inhaltlich noch nicht umgebaut (Etappe 4).
 - Die Tarifangaben auf `/datenquellen` sind noch alt (Etappe 5).
 - Die Beobachtungsliste umfasst nur 8 Aktien.
+
+## Etappe 2: Ergebnis (Code und Anleitung, Serverbetrieb noch offen)
+
+**Nicht durchgeführt:** Einen Hetzner-Server anlegen und starten kann ich aus dieser Umgebung nicht. Mir fehlen Zugang zum Hetzner-Konto und SSH-Schlüssel. Außerdem entstehen dabei laufende Kosten. Alles andere ist vorbereitet. Die Schritte stehen in `deploy/hetzner/README.md`, Abschnitte 1 bis 5b.
+
+**CHANGED**
+- **Migration `0010_bot_messages`:** neue Tabelle `bot_messages`, append-only per Trigger, mit Schlüssel `dedup_key`, damit jede Erkennung nur einmal gespeichert wird.
+  - Getrennt gespeichert: `traded_from/to` (Handel), `published_at` (SEC-Annahme), `detected_at` (erste Erkennung durch den Bot, nie überschrieben).
+  - Außerdem Beobachtungen (Einzelangaben je Meldung), Gegenargumente, Quellen (Index der SEC-Einreichung), Auswahlgrund, `rule_version` und `content_hash`.
+  - `insider_transactions` hat zusätzlich `issuer_name`.
+- **`quant/messages.py`:** dieselben Regeln wie auf der Website.
+  - Kauf ohne Plan ergibt Aussagekraft hoch.
+  - Verkauf ohne Plan ab 1 Mio. $ oder 5 % des Bestands ergibt mittel.
+  - Mindestens 2 Insider mit Käufen innerhalb von 14 Tagen ergeben eine Cluster-Meldung je Firma.
+  - Nur Veröffentlichungen der letzten 14 Tage. Nur, was zum Zeitpunkt bekannt war (`GREATEST(available_at, received_at) <= now`).
+- **Scheduler:** Nach jedem SEC-Abruf (alle 30 min) läuft `detect_insider_messages` mit der Bot-Uhr **nach** dem Abruf.
+- **API:** `GET /messages` (Filter `ticker`, `since`, `limit`) und `GET /messages/{id}`, tokengeschützt.
+- **Website:**
+  - Die Startseite liest zuerst das Archiv. Dann heißt es „Vom Bot erkannt“ mit festem Zeitpunkt, und darüber steht ein Hinweis zur Herkunft.
+  - Ohne Bot-API wendet sie dieselben Regeln live auf die SEC-Daten an und kennzeichnet das klar („Abgerufen“, „noch kein fester Erkennungszeitpunkt“).
+- **Anleitung:** Meldungsarchiv prüfen, Vercel mit dem Bot verbinden.
+
+**TESTED**
+- Python: 158 Tests grün, davon 7 neu in `tests/test_messages.py`. Sie prüfen:
+  - Regeln (Cluster, großer Verkauf; kein Treffer für Plan-Kauf, kleinen Verkauf oder zu alte Meldung);
+  - erste Erkennung bleibt bestehen, keine Doppelarchivierung, drei getrennte Zeitpunkte;
+  - erst Einzelkauf, später Cluster ergibt eine neue Meldung;
+  - vor Eingang der Meldung wird nichts erkannt;
+  - UPDATE und DELETE werden abgewiesen;
+  - API mit Token, 401 ohne Token, 404 bei unbekannter ID.
+- `ruff` und `mypy` ohne Befund.
+- Next.js: 175 Tests grün, davon einer neu für die Archivzuordnung. Typprüfung ohne Befund, ESLint unverändert 5 Altfehler, `next build` erfolgreich.
+- **End-to-End lokal:** echtes Postgres, Ingest mit nachgebildeten EDGAR-Antworten (fiktive Testfirma), Erkennung, echte FastAPI mit Token, Next.js-Produktionsbuild. Die Startseite zeigt die Archivmeldung mit „Vom Bot erkannt“ und den richtigen getrennten Zeiten.
+
+**Offen**
+- Den Serverbetrieb musst du starten (siehe oben). Erst dann entsteht ein echtes, lückenloses Archiv. Ein Archiv für die Vergangenheit lässt sich nicht nachträglich ehrlich erzeugen.
+- Ein Cluster, der später um einen dritten Insider wächst, bekommt keine neue Meldung. Er bleibt die Meldung vom ersten Erkennen.
+- Die Beobachtungsliste des Bots (`EQUITY_SYMBOLS`, Standard: SPY, QQQ, AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD) weicht leicht von der Website-Liste ab (dort mit JPM statt AMD). Das ist beim Deploy per Umgebungsvariable wählbar.
+- Detailseite je Meldung mit späterem Kursverlauf folgt in Etappe 3.

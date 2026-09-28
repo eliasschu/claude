@@ -1,19 +1,36 @@
 import Link from "next/link";
 import { getInsiderActivity } from "@/lib/services/insider";
-import { FEED_RULES, selectBotMessages } from "@/lib/services/bot-feed";
+import { FEED_RULES, fromArchive, selectBotMessages, type BotMessage } from "@/lib/services/bot-feed";
+import { bot } from "@/lib/bot/client";
 import { STOCK_MOVER_UNIVERSE } from "@/config/movers";
 import { BotMessageCard } from "@/components/bot/bot-message-card";
 import { Skeleton } from "@/components/ui/primitives";
 
 /**
- * Beispielmeldung und aktuelle Ereignisse. Beides sind echte, aktuelle
- * Erkennungen aus demselben Datenabruf, keine Demo. Gibt es weniger
- * passende Ereignisse, erscheinen weniger Karten.
+ * Quelle der Meldungen: bevorzugt das unveraenderliche Archiv des Bots
+ * (fester erster Erkennungszeitpunkt). Ist die Bot-API nicht verbunden,
+ * werden dieselben Regeln live auf die SEC-Daten angewandt - klar so
+ * gekennzeichnet.
  */
-export async function BotFeed() {
+async function loadMessages(): Promise<{ messages: BotMessage[]; origin: "archiv" | "live"; issues: string[] }> {
+  const archived = await bot.messages({ limit: 200 });
+  if (archived.ok) return { messages: fromArchive(archived.value.data, new Date(), FEED_RULES.limit + 1), origin: "archiv", issues: [] };
   // Gleiche Parameter wie "Deals der Woche" - der Abruf wird geteilt.
   const activity = await getInsiderActivity(STOCK_MOVER_UNIVERSE, 30, 15);
-  const messages = selectBotMessages(activity, FEED_RULES.limit + 1);
+  return {
+    messages: selectBotMessages(activity, FEED_RULES.limit + 1),
+    origin: "live",
+    issues: [...new Set(activity.issues.map((i) => i.message))],
+  };
+}
+
+/**
+ * Beispielmeldung und aktuelle Ereignisse. Beides sind echte, aktuelle
+ * Erkennungen, keine Demo. Gibt es weniger passende Ereignisse, erscheinen
+ * weniger Karten.
+ */
+export async function BotFeed() {
+  const { messages, origin, issues } = await loadMessages();
   const [example, ...rest] = messages;
 
   return (
@@ -22,6 +39,11 @@ export async function BotFeed() {
         <h2 id="beispiel-titel" className="mb-2 text-[12px] font-bold uppercase tracking-wide text-faint">
           Beispielmeldung · echte aktuelle Erkennung
         </h2>
+        <p className="mb-2 text-[11px] text-faint">
+          {origin === "archiv"
+            ? "Aus dem Meldungsarchiv des Bots: Jede Meldung wird beim ersten Erkennen gespeichert und danach nicht mehr verändert."
+            : "Live aus den SEC-Daten berechnet. Das Meldungsarchiv des Bots ist noch nicht verbunden, deshalb gibt es noch keinen festen Erkennungszeitpunkt."}
+        </p>
         {example ? (
           <BotMessageCard message={example} variant="full" id="beispiel" />
         ) : (
@@ -32,10 +54,8 @@ export async function BotFeed() {
               Demodaten.{" "}
               <Link href="/bot#auswahl" className="underline">Auswahlregeln</Link>
             </p>
-            {activity.issues.length > 0 ? (
-              <p className="mt-2 text-[12px] text-faint">
-                Datenquelle eingeschränkt: {[...new Set(activity.issues.map((i) => i.message))].slice(0, 2).join(" · ")}
-              </p>
+            {issues.length > 0 ? (
+              <p className="mt-2 text-[12px] text-faint">Datenquelle eingeschränkt: {issues.slice(0, 2).join(" · ")}</p>
             ) : null}
           </div>
         )}

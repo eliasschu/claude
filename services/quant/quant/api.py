@@ -261,6 +261,35 @@ def providers_health(conn=Depends(db)) -> dict:
     return envelope(ProviderHealthService(conn).latest())
 
 
+MESSAGE_COLUMNS = """message_id, kind, rule_version, ticker, issuer_cik, issuer_name, title, relevance, uncertainty, counter_arguments,
+                     observations, sources, selection, value_usd, traded_from, traded_to, published_at, detected_at, mode, content_hash"""
+
+
+@app.get("/messages", dependencies=[Auth])
+def list_messages(conn=Depends(db), limit: int = Query(50, ge=1, le=500), ticker: str | None = None,
+                  since: datetime | None = None) -> dict:
+    """Archivierte Bot-Meldungen, neueste Erkennung zuerst. Unveraenderlich; detected_at ist der erste Erkennungszeitpunkt."""
+    where: list[str] = ["mode = 'live'"]
+    params: list[object] = []
+    if ticker:
+        where.append("ticker = %s")
+        params.append(ticker.upper())
+    if since:
+        where.append("detected_at >= %s")
+        params.append(since)
+    rows = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages WHERE {' AND '.join(where)} ORDER BY detected_at DESC, message_id LIMIT %s",
+                        (*params, limit)).fetchall()
+    return envelope(rows)
+
+
+@app.get("/messages/{message_id}", dependencies=[Auth])
+def get_message(message_id: uuid.UUID, conn=Depends(db)) -> dict:
+    row = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages WHERE message_id = %s", (message_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Meldung nicht gefunden")
+    return envelope(row)
+
+
 @app.get("/audit/verify", dependencies=[Auth])
 def audit_verify(conn=Depends(db)) -> dict:
     ok, problems = SignalAuditService(conn).verify_chain()

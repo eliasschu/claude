@@ -95,13 +95,13 @@ class SecIngestor:
                 """INSERT INTO insider_transactions (accession, seq, document_type, issuer_cik, issuer_ticker, owner_ciks, owner_names, roles,
                        officer_title, table_kind, security_title, transaction_date, code, classification, classification_confidence,
                        classification_version, context, discretionary, plan_10b5_1, shares, price, value, acquired_disposed, shares_after,
-                       ownership, nature_of_ownership, footnotes, available_at, received_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       ownership, nature_of_ownership, footnotes, available_at, received_at, issuer_name)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (ref.accession, t.seq, f.document_type, f.issuer_cik, f.issuer_ticker, [o.cik or "" for o in f.owners],
                  [o.name for o in f.owners], roles, next((o.officer_title for o in f.owners if o.officer_title), None), t.table,
                  t.security_title, t.transaction_date, t.code, t.classification, t.classification_confidence, CLASSIFICATION_VERSION,
                  list(t.context), t.discretionary, t.plan_10b5_1, t.shares, t.price, t.value, t.acquired_disposed, t.shares_after,
-                 t.ownership, t.nature_of_ownership, Jsonb(list(t.footnotes)), avail, now))
+                 t.ownership, t.nature_of_ownership, Jsonb(list(t.footnotes)), avail, now, f.issuer_name))
 
     def _schedule13(self, ref: FilingRef, subject_cik: str) -> None:
         url = f"{ref.folder}/{ref.primary_document}"

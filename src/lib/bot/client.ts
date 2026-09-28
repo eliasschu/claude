@@ -8,6 +8,7 @@
  */
 
 import { assertServer, env } from "../core/env.ts";
+import type { ArchivedMessage } from "../services/bot-feed.ts";
 
 export type BotDecision = "LONG_CANDIDATE" | "SHORT_CANDIDATE" | "WATCH" | "NO_TRADE" | "REJECTED_BY_RISK";
 
@@ -95,4 +96,11 @@ export const bot = {
     return botGet<SignalRow[]>(`/signals?${q}`, f);
   },
   signal: (id: string, f?: Fetcher) => botGet<SignalDetail>(`/signals/${encodeURIComponent(id)}`, f),
+  /** Unveraenderliches Meldungsarchiv (erste Erkennung je Ereignis). */
+  messages: (params: { limit?: number; ticker?: string } = {}, f?: Fetcher) => {
+    const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.ticker) q.set("ticker", params.ticker);
+    return botGet<ArchivedMessage[]>(`/messages?${q}`, f);
+  },
+  message: (id: string, f?: Fetcher) => botGet<ArchivedMessage>(`/messages/${encodeURIComponent(id)}`, f),
 };

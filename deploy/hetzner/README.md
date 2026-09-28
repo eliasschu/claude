@@ -65,6 +65,30 @@ docker compose logs -f bot-worker                                               
 
 Docker startet einen Dienst nur bei UNHEALTHY neu. Ein Anbieterausfall führt so nicht zu einem Neustart-Kreislauf.
 
+## 5a. Meldungsarchiv des Bots prüfen
+
+Der `scheduler` holt alle 30 Minuten neue SEC-Insidermeldungen für `EQUITY_SYMBOLS`. Danach wendet er die festen Regeln an (`quant/messages.py`) und speichert neue Bot-Meldungen **einmalig und unveränderlich** mit dem ersten Erkennungszeitpunkt. Beim ersten Start lädt er 120 Tage nach. Als Meldung erscheinen davon nur Veröffentlichungen der letzten 14 Tage.
+
+```bash
+curl -s -H "Authorization: Bearer $BOT_API_TOKEN" "localhost:8000/messages?limit=5"     # neueste Meldungen
+docker compose logs scheduler | grep bot_messages_new                                   # wie viele neu erkannt
+```
+
+`SEC_EDGAR_USER_AGENT` muss Name und E-Mail enthalten, sonst lehnt die SEC ab.
+
+## 5b. Website (Vercel) mit dem Bot verbinden
+
+1. `API_DOMAIN` in `.env` setzen, z. B. `bot.example.de`, und einen DNS-A-Record auf die Server-IP anlegen.
+2. `docker compose --profile proxy up -d` starten. Caddy holt das TLS-Zertifikat selbst.
+3. In Vercel unter Project → Settings → Environment Variables (Production) eintragen:
+   - `BOT_API_URL=https://bot.example.de`
+   - `BOT_API_TOKEN=<derselbe Wert wie auf dem Server>`
+
+   Beide Werte **ohne** `NEXT_PUBLIC_`-Präfix, damit sie nur auf dem Server bleiben.
+4. Neu deployen. Auf der Startseite steht dann über der Beispielmeldung „Aus dem Meldungsarchiv des Bots“, und die Karten zeigen „Vom Bot erkannt“ mit festem Zeitpunkt. Ohne Verbindung rechnet die Website die Regeln live und kennzeichnet das auch so.
+
+Die API bleibt tokengeschützt. Ohne Token liefert nur `/health/ready` den Gesamtzustand.
+
 ## 6. Backups
 
 Der `backup`-Dienst schreibt täglich ein `pg_dump` in das Volume `backups` und löscht Dumps nach 14 Tagen.

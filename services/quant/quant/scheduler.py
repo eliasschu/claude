@@ -113,6 +113,7 @@ def main() -> None:
     import psycopg
 
     from .logs import configure_logging
+    from .messages import detect_insider_messages
     from .worker import backoff_delay
 
     configure_logging("scheduler")
@@ -148,6 +149,7 @@ def main() -> None:
                 last_macro = now
             if now - last_sec >= timedelta(minutes=30):
                 run_sec(conn, _settings, now)
+                detect_insider_messages(conn, datetime.now(timezone.utc))  # Bot-Uhr NACH dem Abruf: nie frueher als received_at
                 last_sec = now
             if now - last_outcomes >= timedelta(minutes=5):
                 bench = {"equity": resolve(conn, "ticker", "SPY", "US"), "crypto": resolve(conn, "exchange_symbol", "BTCUSDT", "binance")}
