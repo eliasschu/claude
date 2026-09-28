@@ -29,6 +29,6 @@ describe("Bot-API-Client", () => {
     process.env.BOT_API_URL = "http://api:8000";
     process.env.BOT_API_TOKEN = "x";
     const r = await bot.status(async () => new Response("nein", { status: 401 }));
-    assert.deepEqual(r, { ok: false, reason: "http", message: "Bot-API antwortete mit 401" });
+    assert.deepEqual(r, { ok: false, reason: "http", status: 401, message: "Bot-API antwortete mit 401" });
   });
 });

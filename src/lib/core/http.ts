@@ -74,6 +74,15 @@ export async function fetchSource<T>(options: FetchOptions<T>): Promise<FetchedV
 
   let lastError: SourceError | null = null;
 
+  // Frische Antwort im Prozessspeicher: sofort zurueck, ohne Drosselung und ohne Netzabruf.
+  // Vorher wartete jeder Aufruf die Drosselung ab (Twelve Data 7,6 s), auch wenn die Antwort laengst vorlag.
+  if (!noStore) {
+    const fresh = lastGood.get(url);
+    if (fresh && Date.now() - fresh.storedAt < revalidate * 1000) {
+      return { value: fresh.value as T, fetchedAt: fresh.fetchedAt, stale: false };
+    }
+  }
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);

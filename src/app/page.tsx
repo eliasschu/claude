@@ -13,6 +13,9 @@ import { MarketRailSkeleton, ListSkeleton } from "@/components/home/skeletons";
  * Abschnitt ist eine eigene Suspense-Grenze, damit eine langsame oder
  * ausgefallene Quelle nie die ganze Seite blockiert.
  */
+// Zur Laufzeit erzeugen: Kursabrufe mit Drosselung duerfen den Build nicht blockieren; die Abschnitte streamen per Suspense.
+export const dynamic = "force-dynamic";
+
 export default function HomePage() {
   return (
     <div className="space-y-9">

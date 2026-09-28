@@ -264,24 +264,64 @@ def providers_health(conn=Depends(db)) -> dict:
 
 
 MESSAGE_COLUMNS = """message_id, kind, rule_version, ticker, issuer_cik, issuer_name, title, relevance, uncertainty, counter_arguments,
-                     observations, sources, selection, value_usd, traded_from, traded_to, published_at, detected_at, mode, content_hash"""
+                     observations, sources, selection, value_usd, traded_from, traded_to, published_at, received_at, detected_at,
+                     mode, content_hash, materiality, amendment, dedup_key"""
+MESSAGE_KINDS = ("insider_cluster", "insider_buy", "insider_sale")
 
 
 @app.get("/messages", dependencies=[Auth])
-def list_messages(conn=Depends(db), limit: int = Query(50, ge=1, le=500), ticker: str | None = None,
-                  since: datetime | None = None) -> dict:
-    """Archivierte Bot-Meldungen, neueste Erkennung zuerst. Unveraenderlich; detected_at ist der erste Erkennungszeitpunkt."""
+def list_messages(conn=Depends(db), limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0, le=100_000),
+                  ticker: str | None = None, kind: str | None = None, materiality: str | None = None,
+                  since: datetime | None = None, until: datetime | None = None) -> dict:
+    """
+    Archivierte Bot-Meldungen, neueste Erkennung zuerst - ALLE nach den Regeln erkannten, auch berichtigte und solche
+    mit spaeterem Kursrueckgang. Unveraenderlich; detected_at ist der erste Erkennungszeitpunkt.
+    """
     where: list[str] = ["mode = 'live'"]
     params: list[object] = []
     if ticker:
         where.append("ticker = %s")
         params.append(ticker.upper())
+    if kind:
+        if kind not in MESSAGE_KINDS:
+            raise HTTPException(422, "Unbekannte Ereignisart")
+        where.append("kind = %s")
+        params.append(kind)
+    if materiality:
+        if materiality not in ("hoch", "mittel"):
+            raise HTTPException(422, "Aussagekraft: hoch oder mittel")
+        where.append("materiality = %s")
+        params.append(materiality)
     if since:
         where.append("detected_at >= %s")
         params.append(since)
-    rows = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages WHERE {' AND '.join(where)} ORDER BY detected_at DESC, message_id LIMIT %s",
-                        (*params, limit)).fetchall()
+    if until:
+        where.append("detected_at < %s")
+        params.append(until)
+    rows = conn.execute(f"""SELECT {MESSAGE_COLUMNS},
+                                   EXISTS (SELECT 1 FROM bot_message_links l WHERE l.to_id = m.message_id) AS has_followups
+                            FROM bot_messages m WHERE {' AND '.join(where)}
+                            ORDER BY detected_at DESC, message_id LIMIT %s OFFSET %s""", (*params, limit, offset)).fetchall()
     return envelope(rows)
+
+
+@app.get("/messages/coverage", dependencies=[Auth])
+def messages_coverage(conn=Depends(db), days: int = Query(30, ge=1, le=365)) -> dict:
+    """
+    Wann hat der Bot tatsaechlich erfolgreich abgerufen? Luecken (z. B. Rechner im Ruhezustand) bedeuten: In dieser Zeit
+    konnte nichts erkannt werden - eine Meldung aus der Luecke traegt spaeter einen entsprechend spaeteren Erkennungszeitpunkt.
+    """
+    from .health import INSIDER_STALE_AFTER
+
+    now = datetime.now(timezone.utc)
+    runs = conn.execute("""SELECT finished_at FROM ingest_runs WHERE task='sec_insider' AND ok AND finished_at >= %s
+                           ORDER BY finished_at""", (now - timedelta(days=days),)).fetchall()
+    first = conn.execute("SELECT min(finished_at) AS t FROM ingest_runs WHERE task='sec_insider' AND ok").fetchone()
+    times = [r["finished_at"] for r in runs]
+    gaps = [{"from": a, "to": b, "hours": round((b - a).total_seconds() / 3600, 1)}
+            for a, b in zip(times, [*times[1:], now]) if b - a > INSIDER_STALE_AFTER]
+    return envelope({"window_days": days, "first_success_ever": first["t"] if first else None, "successful_runs": len(times),
+                     "gaps": gaps, "gap_threshold_minutes": int(INSIDER_STALE_AFTER.total_seconds() // 60), "server_time": now})
 
 
 @app.get("/messages/status", dependencies=[Auth])
@@ -311,10 +351,20 @@ def messages_status(conn=Depends(db)) -> dict:
 
 @app.get("/messages/{message_id}", dependencies=[Auth])
 def get_message(message_id: uuid.UUID, conn=Depends(db)) -> dict:
-    row = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages WHERE message_id = %s", (message_id,)).fetchone()
+    """Eine Meldung mit Pruefsummen-Nachrechnung und allen verknuepften frueheren und spaeteren Meldungen."""
+    from .messages import verify_hash
+
+    row = conn.execute(f"SELECT {MESSAGE_COLUMNS} FROM bot_messages m WHERE message_id = %s", (message_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Meldung nicht gefunden")
-    return envelope(row)
+    links = conn.execute("""
+        SELECT 'frueher' AS direction, l.relation, l.created_at, m.message_id, m.kind, m.title, m.detected_at, m.amendment
+          FROM bot_message_links l JOIN bot_messages m ON m.message_id = l.to_id WHERE l.from_id = %(id)s
+        UNION ALL
+        SELECT 'spaeter', l.relation, l.created_at, m.message_id, m.kind, m.title, m.detected_at, m.amendment
+          FROM bot_message_links l JOIN bot_messages m ON m.message_id = l.from_id WHERE l.to_id = %(id)s
+        ORDER BY detected_at""", {"id": message_id}).fetchall()
+    return envelope({"message": row, "links": links, "hash_verified": verify_hash(row)})
 
 
 @app.get("/audit/verify", dependencies=[Auth])

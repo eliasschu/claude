@@ -45,7 +45,8 @@ describe("Abrufschicht", () => {
     stub([async () => json({ v: 1 })]);
     await fetchSource({ sourceId: "ecb", url: "https://x/3", revalidate: 60, parse: parseJson, retries: 0 });
     stub([async () => { throw new TypeError("offline"); }]);
-    const r = await fetchSource({ sourceId: "ecb", url: "https://x/3", revalidate: 60, parse: parseJson, retries: 0 });
+    // revalidate 0: der Zwischenspeicher gilt als abgelaufen, es wird neu abgerufen - und das schlaegt fehl
+    const r = await fetchSource({ sourceId: "ecb", url: "https://x/3", revalidate: 0, parse: parseJson, retries: 0 });
     assert.deepEqual(r.value, { v: 1 });
     assert.equal(r.stale, true);
     assert.match(r.staleReason!, /Letzter erfolgreicher Abruf/);
@@ -82,5 +83,30 @@ describe("Abrufschicht", () => {
     await Promise.all([1, 2, 3].map((n) =>
       fetchSource({ sourceId: "sec", url: `https://x/thr${n}`, revalidate: 60, parse: parseJson, retries: 0, minIntervalMs: 120 })));
     assert.ok(Date.now() - started >= 240, "drei Abrufe brauchen mindestens zwei Wartezeiten");
+  });
+});
+
+describe("Zwischenspeicher vor der Drosselung", () => {
+  test("frische Antwort kommt ohne Netzabruf und ohne Wartezeit zurück", async () => {
+    const { fetchSource, parseJson, __resetHttpState } = await import("../lib/core/http.ts");
+    __resetHttpState();
+    let calls = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => { calls += 1; return new Response(JSON.stringify({ n: calls }), { status: 200 }); }) as typeof fetch;
+    try {
+      const opts = { sourceId: "twelvedata" as const, url: "https://example.test/cache", revalidate: 60, parse: parseJson, minIntervalMs: 5000 };
+      const first = await fetchSource(opts);
+      const started = Date.now();
+      const second = await fetchSource(opts);
+      assert.equal(calls, 1);
+      assert.deepEqual(second.value, first.value);
+      assert.ok(Date.now() - started < 200, "keine Drosselungspause bei frischem Treffer");
+      const fresh = await fetchSource({ ...opts, noStore: true, minIntervalMs: 0 });
+      assert.equal(calls, 2, "noStore umgeht den Zwischenspeicher");
+      assert.ok(fresh);
+    } finally {
+      globalThis.fetch = original;
+      __resetHttpState();
+    }
   });
 });

@@ -121,8 +121,8 @@ export async function BotFeed() {
             <h2 id="ereignisse-titel" className="text-[12px] font-bold uppercase tracking-wide text-faint">
               {archive ? "Weitere Erkennungen des Bots" : "Weitere Ereignisse · Live-Auswertung"}
             </h2>
-            <Link href="/bot#auswahl" className="ml-auto text-[12px] font-semibold text-accent hover:underline">
-              Wie ausgewählt wird
+            <Link href={archive ? "/meldungen" : "/bot#auswahl"} className="ml-auto text-[12px] font-semibold text-accent hover:underline">
+              {archive ? "Alle Meldungen im Archiv" : "Wie ausgewählt wird"}
             </Link>
           </div>
           <div className="grid gap-3 md:grid-cols-2">

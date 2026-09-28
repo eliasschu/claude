@@ -30,7 +30,7 @@ from .db import Conn
 
 log = logging.getLogger("quant.messages")
 
-RULE_VERSION = "insider-rules-1.0"
+RULE_VERSION = "insider-rules-1.1"
 RULES = {
     "max_age_days": 14,          # nur Meldungen, die hoechstens so alt sind (Veroeffentlichung)
     "cluster_min_owners": 2,     # Cluster: mindestens so viele verschiedene Insider ...
@@ -120,6 +120,11 @@ class Tx:
     published_at: datetime | None = None
     url: str | None = None
     confidence: float = 1.0
+    received_at: datetime | None = None
+    amendment: bool = False
+    # Accessions frueherer Meldungen, die diese Berichtigung (Form 4/A) ersetzt
+    corrects: list[str] = field(default_factory=list)
+    superseded: bool = False
 
     @property
     def share_of_holding(self) -> float | None:
@@ -133,7 +138,8 @@ class Tx:
                 "trade_dates": [d.isoformat() for d in sorted(self.dates)], "shares": self.shares, "value_usd": self.value,
                 "shares_after": self.shares_after, "share_of_holding": self.share_of_holding, "plan_10b5_1": self.plan,
                 "discretionary": self.discretionary, "classification_confidence": self.confidence,
-                "published_at": self.published_at.isoformat() if self.published_at else None, "source_url": self.url}
+                "published_at": self.published_at.isoformat() if self.published_at else None, "source_url": self.url,
+                "received_at": self.received_at.isoformat() if self.received_at else None, "amendment": self.amendment}
 
 
 def load_transactions(conn: Conn, now: datetime) -> list[Tx]:
@@ -153,7 +159,10 @@ def load_transactions(conn: Conn, now: datetime) -> list[Tx]:
             tx = grouped[key] = Tx(
                 accession=r["accession"], issuer_cik=r["issuer_cik"], ticker=r["issuer_ticker"], issuer_name=r.get("issuer_name"),
                 owner=", ".join(format_name(n) for n in r["owner_names"]) or "Unbekannt",
-                role=short_role(list(r["roles"]), r["officer_title"]), kind=kind, published_at=r["available_at"], url=r["url"])
+                role=short_role(list(r["roles"]), r["officer_title"]), kind=kind, published_at=r["available_at"], url=r["url"],
+                amendment=(r["document_type"] or "").upper().endswith("/A"))
+        if tx.received_at is None or r["received_at"] > tx.received_at:
+            tx.received_at = r["received_at"]
         if r["transaction_date"]:
             tx.dates.append(r["transaction_date"])
         tx.shares += r["shares"] or 0.0
@@ -164,7 +173,25 @@ def load_transactions(conn: Conn, now: datetime) -> list[Tx]:
         tx.discretionary = tx.discretionary and r["discretionary"]
         tx.plan = tx.plan or r["plan_10b5_1"]
         tx.confidence = min(tx.confidence, r["classification_confidence"])
-    return list(grouped.values())
+    return resolve_amendments(list(grouped.values()))
+
+
+def resolve_amendments(txs: list[Tx]) -> list[Tx]:
+    """
+    Eine Berichtigung (Form 4/A) ersetzt die urspruengliche Meldung derselben Person, Firma und Richtung mit
+    ueberlappenden Handelstagen. Das Original bleibt im Archiv; fuer Summen und Kaufgruppen zaehlt nur der berichtigte
+    Stand - dieselbe Transaktion wird so nie doppelt gezaehlt.
+    """
+    for a in (t for t in txs if t.amendment):
+        for o in txs:
+            if o is a or o.issuer_cik != a.issuer_cik or o.owner != a.owner or o.kind != a.kind:
+                continue
+            if o.published_at and a.published_at and o.published_at > a.published_at:
+                continue
+            if set(o.dates) & set(a.dates):
+                o.superseded = True
+                a.corrects.append(o.accession)
+    return txs
 
 
 # ---------------------------------------------------------------------- Regeln
@@ -211,6 +238,14 @@ class Message:
     traded_from: date | None
     traded_to: date | None
     published_at: datetime
+    # ab Regelversion 1.1
+    received_at: datetime | None = None
+    materiality: str | None = None
+    amendment: bool = False
+    # Hinweise fuer Verknuepfungen (nicht Teil der Pruefsumme)
+    member_accessions: tuple[str, ...] = ()
+    corrects_accessions: tuple[str, ...] = ()
+    owners: tuple[str, ...] = ()
 
 
 def _sources(txs: list[Tx]) -> list[dict[str, str]]:
@@ -228,10 +263,13 @@ def cluster_message(members: list[Tx]) -> Message:
     value = _value(members)
     span = (dates[-1] - dates[0]).days
     name = members[0].issuer_name or members[0].ticker or f"CIK {members[0].issuer_cik}"
+    corrects = tuple(a for t in members for a in t.corrects)
     return Message(
-        dedup_key=f"insider_cluster:{members[0].issuer_cik}:{dates[0].isoformat()}",
+        dedup_key=f"insider_cluster:{members[0].issuer_cik}:{dates[0].isoformat()}:"
+                  + hashlib.sha256("|".join(sorted(t.accession for t in members)).encode()).hexdigest()[:12],
         kind="insider_cluster", ticker=members[0].ticker, issuer_cik=members[0].issuer_cik, issuer_name=members[0].issuer_name,
-        title=f"{len(owners)} Insider von {name} kaufen innerhalb von {span + 1} {'Tag' if span == 0 else 'Tagen'}"
+        title=("Berichtigung: " if corrects else "")
+              + f"{len(owners)} Insider von {name} kaufen innerhalb von {span + 1} {'Tag' if span == 0 else 'Tagen'}"
               + (f" für zusammen {money(value)}" if value is not None else ""),
         relevance=f"Käufe am offenen Markt durch {', '.join(owners)}. Keine der Meldungen verweist auf einen vorab festgelegten Plan. "
                   "Mehrere Personen mit Einblick in dasselbe Unternehmen setzen eigenes Geld ein.",
@@ -239,7 +277,10 @@ def cluster_message(members: list[Tx]) -> Message:
         observations=[t.observation() for t in members], sources=_sources(members),
         selection=f"Mehrere Insider ({len(owners)}) mit Käufen innerhalb von {RULES['cluster_window_days']} Tagen.",
         value_usd=value, traded_from=dates[0], traded_to=dates[-1],
-        published_at=max(t.published_at for t in members if t.published_at))
+        published_at=max(t.published_at for t in members if t.published_at),
+        received_at=max((t.received_at for t in members if t.received_at), default=None), materiality="hoch",
+        amendment=bool(corrects), corrects_accessions=corrects,
+        member_accessions=tuple(t.accession for t in members), owners=tuple(sorted(owners)))
 
 
 def single_message(tx: Tx, level: str) -> Message:
@@ -251,43 +292,116 @@ def single_message(tx: Tx, level: str) -> Message:
     share = tx.share_of_holding
     if share is not None and share >= 0.05:
         rel.append(f"Das entspricht {share * 100:.0f} % des zuvor gemeldeten Bestands der Person.")
+    if tx.amendment:
+        rel.append("Diese Meldung ist eine Berichtigung (Form 4/A) einer früheren Einreichung; maßgeblich sind die berichtigten Angaben.")
     return Message(
         dedup_key=f"insider_{tx.kind}:{tx.accession}",
         kind="insider_buy" if buy else "insider_sale", ticker=tx.ticker, issuer_cik=tx.issuer_cik, issuer_name=tx.issuer_name,
-        title=f"{tx.owner} ({tx.role}) {'kauft' if buy else 'verkauft'} {tx.ticker or tx.issuer_name}-Aktien"
+        title=("Berichtigung: " if tx.amendment else "")
+              + f"{tx.owner} ({tx.role}) {'kauft' if buy else 'verkauft'} {tx.ticker or tx.issuer_name}-Aktien"
               + (f" für {money(tx.value)}" if tx.value is not None else ""),
         relevance=" ".join(rel), uncertainty=UNCERTAINTY["buy" if buy else "sale"], counter_arguments=COUNTER["buy" if buy else "sale"],
         observations=[tx.observation()], sources=_sources([tx]), selection=f"Aussagekraft {level} nach den Insider-Regeln.",
         value_usd=tx.value, traded_from=dates[0] if dates else None, traded_to=dates[-1] if dates else None,
-        published_at=tx.published_at)  # type: ignore[arg-type]
+        published_at=tx.published_at,  # type: ignore[arg-type]
+        received_at=tx.received_at, materiality=level, amendment=tx.amendment,
+        member_accessions=(tx.accession,), corrects_accessions=tuple(tx.corrects), owners=(tx.owner,))
 
 
 def build_messages(txs: list[Tx]) -> list[Message]:
-    """Cluster ergeben EINE Meldung je Firma; Transaktionen im Cluster erzeugen keine zusaetzliche Einzelmeldung."""
-    eligible = [(t, lvl) for t in txs if (lvl := qualifies(t))]
+    """
+    Cluster ergeben EINE Meldung je Firma und Mitgliederkreis; Transaktionen im Cluster erzeugen keine zusaetzliche
+    Einzelmeldung. Durch eine Berichtigung ersetzte Meldungen erzeugen keine neue Meldung (die Berichtigung schon).
+    """
+    eligible = [(t, lvl) for t in txs if not t.superseded and (lvl := qualifies(t))]
     clusters = find_clusters([t for t, _ in eligible if t.kind == "buy"])
     in_cluster = {id(t) for c in clusters for t in c}
     return [cluster_message(c) for c in clusters] + [single_message(t, lvl) for t, lvl in eligible if id(t) not in in_cluster]
 
 
+# Felder, die je Regelversion in die Pruefsumme eingehen - so bleiben aeltere Meldungen ueberpruefbar.
+HASH_FIELDS: dict[str, tuple[str, ...]] = {
+    "insider-rules-1.0": ("dedup_key", "kind", "ticker", "issuer_cik", "issuer_name", "title", "relevance", "uncertainty",
+                          "counter_arguments", "observations", "sources", "selection", "value_usd", "traded_from", "traded_to",
+                          "published_at"),
+}
+HASH_FIELDS["insider-rules-1.1"] = (*HASH_FIELDS["insider-rules-1.0"], "received_at", "materiality", "amendment")
+
+
+def content_hash(values: dict[str, Any], rule_version: str) -> str:
+    fields = HASH_FIELDS[rule_version]
+    blob = json.dumps({k: values.get(k) for k in fields}, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(f"{rule_version}|{blob}".encode()).hexdigest()
+
+
+def verify_hash(row: dict[str, Any]) -> bool | None:
+    """Rechnet die Pruefsumme aus den gespeicherten Feldern nach. None = Regelversion unbekannt."""
+    if row.get("rule_version") not in HASH_FIELDS:
+        return None
+    return content_hash(row, row["rule_version"]) == row.get("content_hash")
+
+
 def _hash(m: Message) -> str:
-    blob = json.dumps({k: getattr(m, k) for k in Message.__dataclass_fields__}, sort_keys=True, default=str, ensure_ascii=False)
-    return hashlib.sha256(f"{RULE_VERSION}|{blob}".encode()).hexdigest()
+    return content_hash({k: getattr(m, k) for k in HASH_FIELDS[RULE_VERSION]}, RULE_VERSION)
+
+
+def _existing_clusters(conn: Conn, issuer_cik: str, first_trade: date | None) -> list[tuple[str, set[str], set[str]]]:
+    """(Meldungs-ID, Personen, Einreichungen) bereits archivierter Kaufgruppen derselben Firma und desselben Beginns."""
+    rows = conn.execute("""SELECT message_id, observations FROM bot_messages
+                           WHERE kind='insider_cluster' AND issuer_cik=%s AND traded_from=%s""", (issuer_cik, first_trade)).fetchall()
+    return [(str(r["message_id"]), {o.get("owner") for o in r["observations"]}, {o.get("accession") for o in r["observations"]})
+            for r in rows]
+
+
+def _messages_with_accessions(conn: Conn, accessions: tuple[str, ...], kinds: tuple[str, ...]) -> list[str]:
+    ids: list[str] = []
+    for acc in accessions:
+        rows = conn.execute("SELECT message_id FROM bot_messages WHERE kind = ANY(%s) AND observations @> %s",
+                            (list(kinds), Jsonb([{"accession": acc}]))).fetchall()
+        ids += [str(r["message_id"]) for r in rows if str(r["message_id"]) not in ids]
+    return ids
 
 
 def archive(conn: Conn, messages: list[Message], *, detected_at: datetime, mode: str = "live") -> int:
-    """Speichert neue Meldungen; bereits archivierte (gleicher dedup_key) bleiben unveraendert."""
+    """
+    Speichert neue Meldungen; bereits archivierte bleiben unveraendert. Neue Meldungen werden mit frueheren
+    verknuepft (nur anhaengend):
+      berichtigt       Berichtigung -> urspruengliche Meldung(en) mit derselben Transaktion
+      erweitert        groessere Kaufgruppe -> fruehere, kleinere Kaufgruppe derselben Firma und desselben Beginns
+      fasst_zusammen   Kaufgruppe -> fruehere Einzelmeldungen ihrer Mitglieder
+    """
     new = 0
     for m in messages:
+        links: list[tuple[str, str]] = []
+        if m.kind == "insider_cluster":
+            existing = _existing_clusters(conn, m.issuer_cik, m.traded_from)
+            corrected = [mid for mid, _, accs in existing if set(m.corrects_accessions) & accs]
+            if corrected:
+                # Eine archivierte Kaufgruppe enthielt eine inzwischen berichtigte Meldung -> neue, berichtigte Kaufgruppe
+                links += [("berichtigt", mid) for mid in corrected]
+                links += [("berichtigt", mid) for mid in _messages_with_accessions(conn, m.corrects_accessions, ("insider_buy",))]
+            else:
+                if any(set(m.owners) <= owners for _, owners, _ in existing):
+                    continue  # dieselbe (oder bereits groessere) Kaufgruppe ist schon archiviert
+                links += [("erweitert", mid) for mid, owners, _ in existing if owners < set(m.owners)]
+            links += [("fasst_zusammen", mid) for mid in _messages_with_accessions(conn, m.member_accessions, ("insider_buy",))]
+        elif m.corrects_accessions:
+            links += [("berichtigt", mid) for mid in _messages_with_accessions(
+                conn, m.corrects_accessions, ("insider_buy", "insider_sale", "insider_cluster"))]
+        message_id = uuid.uuid4()
         cur = conn.execute(
             """INSERT INTO bot_messages (message_id, dedup_key, kind, rule_version, ticker, issuer_cik, issuer_name, title, relevance,
                    uncertainty, counter_arguments, observations, sources, selection, value_usd, traded_from, traded_to, published_at,
-                   detected_at, mode, content_hash)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (dedup_key) DO NOTHING""",
-            (uuid.uuid4(), m.dedup_key, m.kind, RULE_VERSION, m.ticker, m.issuer_cik, m.issuer_name, m.title, m.relevance, m.uncertainty,
+                   detected_at, mode, content_hash, received_at, materiality, amendment)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (dedup_key) DO NOTHING""",
+            (message_id, m.dedup_key, m.kind, RULE_VERSION, m.ticker, m.issuer_cik, m.issuer_name, m.title, m.relevance, m.uncertainty,
              Jsonb(m.counter_arguments), Jsonb(m.observations), Jsonb(m.sources), m.selection, m.value_usd, m.traded_from, m.traded_to,
-             m.published_at, detected_at, mode, _hash(m)))
-        new += cur.rowcount
+             m.published_at, detected_at, mode, _hash(m), m.received_at, m.materiality, m.amendment))
+        if cur.rowcount:
+            new += 1
+            for relation, target in links:
+                conn.execute("""INSERT INTO bot_message_links (from_id, to_id, relation, created_at) VALUES (%s,%s,%s,%s)
+                                ON CONFLICT DO NOTHING""", (message_id, target, relation, detected_at))
     return new
 
 

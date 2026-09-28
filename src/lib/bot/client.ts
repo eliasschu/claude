@@ -8,7 +8,7 @@
  */
 
 import { assertServer, env } from "../core/env.ts";
-import type { ArchivedMessage } from "../services/bot-feed.ts";
+import type { ArchivedMessage, BotMessageKind, Coverage, MessageDetail } from "../services/bot-feed.ts";
 
 export type BotDecision = "LONG_CANDIDATE" | "SHORT_CANDIDATE" | "WATCH" | "NO_TRADE" | "REJECTED_BY_RISK";
 
@@ -67,7 +67,11 @@ export interface BotStatus {
 /** not_configured: keine Bot-Adresse gesetzt; unreachable: keine Antwort (Rechner aus/schlafend, Docker gestoppt); http: Fehlerstatus. */
 export type BotFailure = "not_configured" | "unreachable" | "http";
 
-export type BotResult<T> = { ok: true; value: Envelope<T> } | { ok: false; message: string; reason: BotFailure };
+export interface ArchiveQuery {
+  limit?: number; offset?: number; ticker?: string; kind?: BotMessageKind; materiality?: "hoch" | "mittel"; since?: string;
+}
+
+export type BotResult<T> = { ok: true; value: Envelope<T> } | { ok: false; message: string; reason: BotFailure; status?: number };
 
 export interface ArchiveStatus {
   interval_minutes: number;
@@ -96,7 +100,7 @@ export async function botGet<T>(path: string, fetcher: Fetcher = fetch): Promise
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) return { ok: false, reason: "http", message: `Bot-API antwortete mit ${response.status}` };
+    if (!response.ok) return { ok: false, reason: "http", status: response.status, message: `Bot-API antwortete mit ${response.status}` };
     return { ok: true, value: (await response.json()) as Envelope<T> };
   } catch {
     return { ok: false, reason: "unreachable", message: "Bot-API nicht erreichbar" };
@@ -114,11 +118,16 @@ export const bot = {
   },
   signal: (id: string, f?: Fetcher) => botGet<SignalDetail>(`/signals/${encodeURIComponent(id)}`, f),
   /** Unveraenderliches Meldungsarchiv (erste Erkennung je Ereignis). */
-  messages: (params: { limit?: number; ticker?: string } = {}, f?: Fetcher) => {
+  messages: (params: ArchiveQuery = {}, f?: Fetcher) => {
     const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.offset) q.set("offset", String(params.offset));
     if (params.ticker) q.set("ticker", params.ticker);
+    if (params.kind) q.set("kind", params.kind);
+    if (params.materiality) q.set("materiality", params.materiality);
+    if (params.since) q.set("since", params.since);
     return botGet<ArchivedMessage[]>(`/messages?${q}`, f);
   },
+  coverage: (days = 30, f?: Fetcher) => botGet<Coverage>(`/messages/coverage?days=${days}`, f),
   archiveStatus: (f?: Fetcher) => botGet<ArchiveStatus>("/messages/status", f),
-  message: (id: string, f?: Fetcher) => botGet<ArchivedMessage>(`/messages/${encodeURIComponent(id)}`, f),
+  message: (id: string, f?: Fetcher) => botGet<MessageDetail>(`/messages/${encodeURIComponent(id)}`, f),
 };

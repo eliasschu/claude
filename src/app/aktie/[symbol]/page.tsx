@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getStockOverview, FEATURED_TICKERS } from "@/lib/services/stocks";
+import { findListing, getStockOverview } from "@/lib/services/stocks";
 import { toValuationView } from "@/lib/services/stock-analysis";
 import { toUiMeta, type Candle } from "@/lib/data/types";
 import { Card, CardBody, Chip } from "@/components/ui/primitives";
@@ -20,14 +20,14 @@ export const revalidate = 900;
 
 type Params = { params: Promise<{ symbol: string }> };
 
-export async function generateStaticParams() {
-  return FEATURED_TICKERS.map((symbol) => ({ symbol }));
-}
+// Bewusst KEIN generateStaticParams: Aktienseiten werden erst beim Aufruf erzeugt (und zwischengespeichert).
+// Beim Vorberechnen im Build liefen sonst Kursabrufe mit Drosselung (7,6 s je Abruf) ueber das 60-Sekunden-Limit.
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { symbol } = await params;
-  const overview = await getStockOverview(symbol.toUpperCase());
-  return { title: overview.ok ? `${overview.data.company.name} (${overview.data.listing.ticker}) – Der junge Kapitalist` : "Wertpapier nicht gefunden" };
+  // Nur die Tickerliste - kein zweiter vollstaendiger Datenabruf fuer den Seitentitel.
+  const listing = await findListing(symbol.toUpperCase());
+  return { title: listing.ok ? `${listing.data.name} (${listing.data.ticker}) – Der junge Kapitalist` : "Wertpapier nicht gefunden" };
 }
 
 const SECTIONS = [

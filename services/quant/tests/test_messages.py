@@ -12,9 +12,9 @@ from quant.sec.ingest import SecIngestor
 
 
 def form4(owner: str, code: str, date: str, shares: int, price: float, after: int, *, plan: int = 0, title: str = "Chief Executive Officer",
-          acquired: str | None = None) -> str:
+          acquired: str | None = None, doc_type: str = "4") -> str:
     ad = acquired or ("A" if code == "P" else "D")
-    return f"""<ownershipDocument><documentType>4</documentType><aff10b5One>{plan}</aff10b5One>
+    return f"""<ownershipDocument><documentType>{doc_type}</documentType><aff10b5One>{plan}</aff10b5One>
 <issuer><issuerCik>0000000042</issuerCik><issuerName>Test Corp</issuerName><issuerTradingSymbol>TST</issuerTradingSymbol></issuer>
 <reportingOwner><reportingOwnerId><rptOwnerCik>1</rptOwnerCik><rptOwnerName>{owner}</rptOwnerName></reportingOwnerId>
 <reportingOwnerRelationship><isOfficer>1</isOfficer><officerTitle>{title}</officerTitle></reportingOwnerRelationship></reportingOwner>
@@ -155,7 +155,11 @@ def test_api_lists_and_returns_messages(db, monkeypatch):
         body = c.get("/messages?ticker=tst", headers=h).json()
         assert len(body["data"]) == 2 and body["meta"]["audience"] == "internal"
         one = c.get(f"/messages/{body['data'][0]['message_id']}", headers=h).json()["data"]
-        assert one["detected_at"] and one["published_at"] and one["observations"]
+        assert one["message"]["detected_at"] and one["message"]["published_at"] and one["message"]["observations"]
+        assert one["hash_verified"] is True and one["links"] == []
+        assert len(c.get("/messages?kind=insider_sale", headers=h).json()["data"]) == 1
+        assert len(c.get("/messages?materiality=hoch", headers=h).json()["data"]) == 1
+        assert c.get("/messages?kind=unsinn", headers=h).status_code == 422
         assert c.get("/messages/00000000-0000-0000-0000-000000000000", headers=h).status_code == 404
     finally:
         api.app.dependency_overrides.clear()
@@ -253,3 +257,149 @@ def test_repeated_runs_never_duplicate_and_concurrent_run_is_skipped(db, monkeyp
     finally:
         other.close()
     assert archive_summary(db)["runs"] == 2, "uebersprungener Lauf wird nicht als Abruf gezaehlt"
+
+
+# ---------------------------------------------------------------------------- Etappe B: Folgeereignisse und Berichtigungen
+DOCS.update({
+    "/g.xml": form4("NEU NORA", "P", "2026-09-23", 2_000, 52, 6_000),                                    # dritte Kaeuferin
+    "/h.xml": form4("MUSTER ANNA", "P", "2026-09-17", 12_000, 50, 32_000, doc_type="4/A"),               # Berichtigung von a.xml
+})
+AMEND = ("0000000042-26-000008", "2026-09-24", "2026-09-17", "2026-09-24T17:00:00.000Z", "4/A", "xslF345X05/h.xml")
+THIRD = ("0000000042-26-000007", "2026-09-24", "2026-09-23", "2026-09-24T16:00:00.000Z", "4", "xslF345X05/g.xml")
+
+
+def links(db):
+    return db.execute("""SELECT f.kind AS from_kind, f.amendment AS from_amendment, l.relation, t.kind AS to_kind
+                         FROM bot_message_links l JOIN bot_messages f ON f.message_id=l.from_id JOIN bot_messages t ON t.message_id=l.to_id
+                         ORDER BY l.relation""").fetchall()
+
+
+def test_growing_cluster_is_a_new_linked_message_original_untouched(db):
+    t1 = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], t1)
+    detect_insider_messages(db, t1)
+    t2 = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:2], t2)
+    detect_insider_messages(db, t2)
+    first_cluster = db.execute("SELECT * FROM bot_messages WHERE kind='insider_cluster'").fetchone()
+    t3 = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+    ingest(db, [*FILINGS[:2], THIRD], t3)
+    assert detect_insider_messages(db, t3) == 1
+    clusters = db.execute("SELECT * FROM bot_messages WHERE kind='insider_cluster' ORDER BY detected_at").fetchall()
+    assert len(clusters) == 2 and clusters[0] == first_cluster, "fruehere Kaufgruppe bleibt unveraendert"
+    assert clusters[1]["title"].startswith("3 Insider") and clusters[1]["detected_at"] == t3
+    rel = {(r["from_kind"], r["relation"], r["to_kind"]) for r in links(db)}
+    assert ("insider_cluster", "erweitert", "insider_cluster") in rel
+    assert ("insider_cluster", "fasst_zusammen", "insider_buy") in rel
+    assert detect_insider_messages(db, t3 + timedelta(hours=1)) == 0, "keine Wiederholung"
+
+
+def test_amendment_is_linked_correction_and_never_double_counted(db):
+    t1 = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], t1)
+    detect_insider_messages(db, t1)
+    original = db.execute("SELECT * FROM bot_messages").fetchone()
+    t2 = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+    ingest(db, [FILINGS[0], AMEND], t2)
+    assert detect_insider_messages(db, t2) == 1
+    fix = db.execute("SELECT * FROM bot_messages WHERE amendment").fetchone()
+    assert fix["title"].startswith("Berichtigung:") and "600,00" in fix["title"]
+    assert db.execute("SELECT * FROM bot_messages WHERE message_id=%s", (original["message_id"],)).fetchone() == original
+    assert [(r["from_amendment"], r["relation"]) for r in links(db)] == [(True, "berichtigt")]
+
+
+def test_amendment_seen_together_with_original_replaces_it(db):
+    now = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+    ingest(db, [FILINGS[0], AMEND], now)
+    detect_insider_messages(db, now)
+    rows = db.execute("SELECT amendment, value_usd FROM bot_messages").fetchall()
+    assert [(r["amendment"], r["value_usd"]) for r in rows] == [(True, 600_000)], "ersetztes Original erzeugt keine eigene Meldung"
+
+
+def test_received_at_and_hash_verification(db):
+    from quant.messages import verify_hash
+    now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS, now)
+    detect_insider_messages(db, now + timedelta(minutes=5))
+    for r in db.execute("SELECT * FROM bot_messages").fetchall():
+        assert r["received_at"] == now and r["published_at"] <= r["received_at"] <= r["detected_at"]
+        assert r["materiality"] in ("hoch", "mittel") and r["rule_version"] == "insider-rules-1.1"
+        assert verify_hash(r) is True
+        assert verify_hash({**r, "value_usd": (r["value_usd"] or 0) + 1}) is False
+    assert verify_hash({"rule_version": "unbekannt"}) is None
+
+
+def test_legacy_1_0_hash_stays_verifiable():
+    from quant.messages import content_hash, verify_hash
+    row = {"dedup_key": "k", "kind": "insider_buy", "ticker": "TST", "issuer_cik": "42", "issuer_name": "T", "title": "t", "relevance": "r",
+           "uncertainty": "u", "counter_arguments": [], "observations": [{"a": 1}], "sources": [], "selection": "s", "value_usd": 1.0,
+           "traded_from": None, "traded_to": None, "published_at": datetime(2026, 9, 1, tzinfo=timezone.utc), "rule_version": "insider-rules-1.0",
+           "received_at": None, "materiality": None, "amendment": False}
+    row["content_hash"] = content_hash(row, "insider-rules-1.0")
+    assert verify_hash(row) is True
+
+
+def test_links_are_append_only(db):
+    t1 = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], t1)
+    detect_insider_messages(db, t1)
+    t2 = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:2], t2)
+    detect_insider_messages(db, t2)
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        db.execute("DELETE FROM bot_message_links")
+    db.rollback()
+
+
+def test_api_detail_links_and_coverage_gaps(db, monkeypatch):
+    import uuid
+
+    from fastapi.testclient import TestClient
+    from psycopg.types.json import Jsonb
+
+    import quant.api as api
+    t1 = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], t1)
+    detect_insider_messages(db, t1)
+    t2 = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:2], t2)
+    detect_insider_messages(db, t2)
+    now = datetime.now(timezone.utc)
+    for minutes_ago in (600, 570, 540, 60, 30):  # Luecke zwischen -540 und -60 Minuten
+        t = now - timedelta(minutes=minutes_ago)
+        db.execute("INSERT INTO ingest_runs VALUES (%s,'sec_insider',%s,%s,true,%s,NULL)", (uuid.uuid4(), t, t, Jsonb({})))
+    db.commit()
+    monkeypatch.setenv("BOT_API_TOKEN", "t")
+    db.autocommit = True
+    api.app.dependency_overrides[api.db] = lambda: db
+    try:
+        c = TestClient(api.app)
+        h = {"Authorization": "Bearer t"}
+        single = next(m for m in c.get("/messages", headers=h).json()["data"] if m["kind"] == "insider_buy")
+        assert single["has_followups"] is True
+        detail = c.get(f"/messages/{single['message_id']}", headers=h).json()["data"]
+        assert [(lk["direction"], lk["relation"], lk["kind"]) for lk in detail["links"]] == [("spaeter", "fasst_zusammen", "insider_cluster")]
+        cov = c.get("/messages/coverage?days=2", headers=h).json()["data"]
+        assert cov["successful_runs"] == 5 and len(cov["gaps"]) == 1 and cov["gaps"][0]["hours"] == 8.0
+    finally:
+        api.app.dependency_overrides.clear()
+
+
+def test_correction_of_a_member_creates_a_corrected_cluster_message(db):
+    t1 = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:1], t1)
+    detect_insider_messages(db, t1)
+    t2 = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
+    ingest(db, FILINGS[:2], t2)
+    detect_insider_messages(db, t2)
+    old = db.execute("SELECT * FROM bot_messages WHERE kind='insider_cluster'").fetchone()
+    t3 = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+    ingest(db, [*FILINGS[:2], AMEND], t3)
+    assert detect_insider_messages(db, t3) == 1
+    new = db.execute("SELECT * FROM bot_messages WHERE kind='insider_cluster' AND amendment").fetchone()
+    assert new["title"].startswith("Berichtigung: 2 Insider") and new["value_usd"] == 600_000 + 204_000
+    assert db.execute("SELECT * FROM bot_messages WHERE message_id=%s", (old["message_id"],)).fetchone() == old
+    rel = {(r["from_kind"], r["relation"], r["to_kind"]) for r in links(db)}
+    assert ("insider_cluster", "berichtigt", "insider_cluster") in rel
+    assert ("insider_cluster", "berichtigt", "insider_buy") in rel, "auch die fruehere Einzelmeldung gilt als berichtigt"
+    assert detect_insider_messages(db, t3 + timedelta(hours=1)) == 0, "Berichtigung wird nicht wiederholt"

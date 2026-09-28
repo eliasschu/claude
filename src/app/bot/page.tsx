@@ -70,8 +70,8 @@ export default function BotPage() {
           <Link href="/#beispiel" className="inline-flex h-10 items-center rounded-[12px] bg-accent px-4 text-[13px] font-bold text-accent-ink hover:opacity-90">
             Aktuelle Beispielmeldung
           </Link>
-          <Link href="/tracker" className="inline-flex h-10 items-center rounded-[12px] border border-line-strong bg-surface px-4 text-[13px] font-bold hover:bg-surface-2">
-            Alle Insidermeldungen
+          <Link href="/meldungen" className="inline-flex h-10 items-center rounded-[12px] border border-line-strong bg-surface px-4 text-[13px] font-bold hover:bg-surface-2">
+            Meldungsarchiv
           </Link>
         </div>
       </header>
@@ -158,12 +158,14 @@ export default function BotPage() {
       </section>
 
       <section aria-labelledby="nachvollziehbarkeit">
-        <h2 id="nachvollziehbarkeit" className="mb-3 text-[18px] font-bold tracking-[-0.01em]">Nachvollziehbarkeit: noch im Aufbau</h2>
+        <h2 id="nachvollziehbarkeit" className="mb-3 text-[18px] font-bold tracking-[-0.01em]">Nachvollziehbarkeit</h2>
         <p className="text-[13px] leading-relaxed text-muted">
-          Geplant sind eine Detailseite je Meldung mit Quellen, Beobachtungen, Gegenargumenten und späterem Verlauf sowie ein
-          vollständiges Archiv nach festen Regeln, einschließlich der Fälle, die sich nicht bestätigt haben. Simulierte Ergebnisse
-          und laufend erfasste Ergebnisse werden dabei immer getrennt ausgewiesen. <strong className="text-ink">Das ist noch
-          nicht verfügbar.</strong> Heute verlinkt jede Meldung direkt auf die Originalquelle.
+          Jede archivierte Meldung hat eine <Link href="/meldungen" className="underline">Detailseite</Link> mit vier getrennten
+          Zeitpunkten (Handel, Veröffentlichung, Eingang beim Bot, Erkennung), den Einzelangaben aus der SEC-Meldung, Auswahlregel,
+          Gegenargumenten, Originalquellen, nachrechenbarer Prüfsumme und dem späteren Kursverlauf (sofern Kursdaten verbunden sind).
+          Berichtigungen und größer werdende Kaufgruppen erscheinen als neue, verknüpfte Meldungen; das Original bleibt unverändert.
+          Das Archiv zeigt alle Fälle, auch die ohne späteren Kursanstieg, und die Zeiten, in denen der Bot nicht lief.
+          <strong className="text-ink"> Trefferquoten gibt es bewusst noch nicht</strong>: Dafür fehlen genug laufend erfasste Fälle.
         </p>
       </section>
     </div>

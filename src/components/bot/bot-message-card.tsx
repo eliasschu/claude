@@ -76,6 +76,9 @@ export function BotMessageCard({ message: m, variant = "compact", headingLevel =
           <a key={s.url} href={s.url} className="underline decoration-dotted underline-offset-2 hover:text-ink">{s.label} ↗</a>
         ))}
         {!full && m.sources.length > 2 ? <span>+{m.sources.length - 2} weitere Quellen</span> : null}
+        {m.origin === "archiv" ? (
+          <Link href={`/meldungen/${m.id}`} className="ml-auto font-semibold text-accent hover:underline">Details und Verlauf →</Link>
+        ) : null}
       </div>
     </Card>
   );

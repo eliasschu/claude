@@ -186,6 +186,34 @@ export interface ArchivedMessage {
   title: string; relevance: string; uncertainty: string; counter_arguments: string[];
   sources: { label: string; url: string }[]; selection: string; value_usd: number | null;
   traded_from: string | null; traded_to: string | null; published_at: string; detected_at: string;
+  /** Ab Regelversion 1.1; aeltere Meldungen: null (wird nie nachgetragen). */
+  received_at?: string | null; materiality?: "hoch" | "mittel" | null; amendment?: boolean;
+  rule_version?: string; content_hash?: string; dedup_key?: string;
+  observations?: Observation[];
+  /** Nur in der Liste: gibt es spaetere verknuepfte Meldungen (Berichtigung, Erweiterung)? */
+  has_followups?: boolean;
+}
+
+/** Einzelangabe aus einer SEC-Meldung, wie der Bot sie gespeichert hat. */
+export interface Observation {
+  accession: string; owner: string; role: string; direction: "buy" | "sale"; trade_dates: string[];
+  shares: number | null; value_usd: number | null; shares_after: number | null; share_of_holding: number | null;
+  plan_10b5_1: boolean; discretionary: boolean; classification_confidence: number;
+  published_at: string | null; source_url: string | null; received_at?: string | null; amendment?: boolean;
+}
+
+export type LinkRelation = "berichtigt" | "erweitert" | "fasst_zusammen";
+
+export interface MessageLink {
+  direction: "frueher" | "spaeter"; relation: LinkRelation; created_at: string;
+  message_id: string; kind: BotMessageKind; title: string; detected_at: string; amendment: boolean;
+}
+
+export interface MessageDetail { message: ArchivedMessage; links: MessageLink[]; hash_verified: boolean | null }
+
+export interface Coverage {
+  window_days: number; first_success_ever: string | null; successful_runs: number;
+  gaps: { from: string; to: string; hours: number }[]; gap_threshold_minutes: number; server_time: string;
 }
 
 /**

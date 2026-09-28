@@ -27,7 +27,7 @@ Legende:
 | Insider-Tracker, Große Fische (13F) | ✔ | ✔ | ✖ | Live-Abruf der Website |
 | Watchlist im Browser | ✔ | ✖ | – | nur `localStorage` |
 | Interne Handelssignal-Engine (Paper) | ✔ | ✔ | ✖ | bleibt intern |
-| Meldungsdetailseite, Archivansicht | ✖ | ✖ | ✖ | Etappe B |
+| Meldungsdetailseite, Archiv mit Filtern und Abdeckungslücken, verknüpfte Berichtigungen und Erweiterungen, Kursverlauf ab Veröffentlichung und ab Erkennung | ✔ | ✔ (Regeln, Verknüpfungen, Prüfsumme, Kursverlauf; End-to-End mit Testfirma) | ✖ | Etappe B. Neuordnung der Aktienseite noch offen |
 | „Was hat sich verändert?“ für die Watchlist | ✖ | ✖ | ✖ | Etappe C |
 | Thesen-Tagebuch | ✖ | ✖ | ✖ | Etappe C |
 | Berichtsvergleiche (Quartal/Jahr) | ✖ | ✖ | ✖ | Etappe D |
@@ -100,6 +100,8 @@ Zuerst steht die Aussage, Rechenwege und Quellen sind aufklappbar.
 
 ## 5. Backlog (erst mit belastbarer Quelle, vertretbarem Aufwand und Nutzungsrechten)
 
+Die Quellenrecherche des Nutzers (DACH, Australien, USA, global) steht geprüft und mit Korrekturen in `07-quellenregister.md`.
+
 1. **Größeres US-Universum.** Hindernis ist die SEC-Abruflast. Nötig sind die Umstellung auf `companyfacts` und Caching.
 2. **Kongressmeldungen.** Der Meldeverzug (bis zu 45 Tage) muss sichtbar sein, die Zuordnung zu Personen korrekt.
 3. **13F-Bestandsänderungen.** Klar trennen: gemeldeter Stand zum Stichtag, der tatsächliche Handelszeitpunkt ist unbekannt.
@@ -157,3 +159,66 @@ npm install && npm run dev          # zweites Terminal
 ```
 
 Erwartet wird: SEC-Abruf erfolgreich, wobei null neue Meldungen ein gültiges Ergebnis ist. Ein wiederholter Abruf erzeugt keine Doppelten. Die Wiederherstellungsprobe stimmt. Die Website zeigt „Bot aktiv“.
+
+## 8. Etappe B: Ergebnis (Meldungsdetail, Archiv, Nachvollziehbarkeit)
+
+**CHANGED**
+- **Migration `0012`:**
+  - `bot_messages` hat zusätzlich `received_at` (Eingang beim Bot), `materiality` und `amendment`. Ältere Zeilen bleiben unverändert und zeigen „nicht erfasst“.
+  - Neue Tabelle `bot_message_links` (nur anhängend) mit den Arten `berichtigt`, `erweitert` und `fasst_zusammen`.
+- **`quant/messages.py` (Regelversion `insider-rules-1.1`):**
+  - **Berichtigungen (Form 4/A)** ersetzen die ursprüngliche Transaktion (gleiche Person, Firma, Richtung, überlappende Handelstage) für Summen und Kaufgruppen. So wird nie doppelt gezählt. Eine Berichtigung wird eine neue Meldung mit „Berichtigung:“ und Verknüpfung zum Original. Wird ein Mitglied einer archivierten Kaufgruppe berichtigt, entsteht eine **berichtigte Kaufgruppe**.
+  - **Kaufgruppen**, die um weitere Insider wachsen, werden neue, verknüpfte Meldungen. Sie verweisen auch auf frühere Einzelmeldungen ihrer Mitglieder.
+  - **Prüfsumme je Regelversion:** Meldungen mit Version 1.0 bleiben nachrechenbar.
+  - Kaufgruppen, die unter dem alten Schlüssel archiviert sind, werden anhand der beteiligten Personen erkannt und nicht doppelt archiviert.
+- **API:**
+  - `GET /messages` mit Filtern für Ereignisart, Aussagekraft, Zeitraum, Seitenabruf und Hinweis auf Folgemeldungen.
+  - `GET /messages/{id}` mit Verknüpfungen in beide Richtungen und nachgerechneter Prüfsumme.
+  - `GET /messages/coverage`: Lücken, in denen der Bot nicht erfolgreich abrief.
+- **Website:**
+  - `/meldungen` (Archiv mit Filtern in der URL, Seitenabruf, Abdeckungslücken, keine Trefferquoten).
+  - `/meldungen/[id]`:
+    - Kernaussage, Aussagekraft und Status;
+    - vier Zeitpunkte als Zeitleiste und Hinweis bei nachträglicher Erkennung;
+    - Einzelangaben als Karten mit aufklappbaren Details;
+    - Einordnung mit Regelversion und Gegenargumenten;
+    - verknüpfte Meldungen;
+    - Kursverlauf ab Veröffentlichung und ab Erkennung mit SPY-Vergleich;
+    - Quellen und Prüfsumme.
+  - Karten der Startseite verlinken auf die Detailseite, aber nur Archivmeldungen.
+- **Kursverlauf** (`src/lib/finance/event-returns.ts`):
+  - Ausgangspunkt ist der erste Schlusskurs **nach** dem Zeitpunkt (16:00 New York, Sommerzeit berücksichtigt).
+  - Horizonte in Handelstagen; nicht erreichte Horizonte bleiben leer.
+  - Der heutige Balken zählt vor Handelsschluss nicht.
+  - Fehlt ein Vergleichstag, gibt es keinen Vergleich, statt eine Lücke zu überspringen.
+- **Zwei Build-Fehler behoben, die mit gesetztem Twelve-Data-Schlüssel auftraten:**
+  - Aktienseiten und Startseite überschritten beim Bauen das 60-Sekunden-Limit.
+  - Ursache: Die Drosselung wartete auch bei bereits vorliegender Antwort.
+  - Jetzt kommt eine frische Antwort sofort aus dem Speicher.
+  - Aktienseiten werden erst beim Aufruf erzeugt, die Startseite zur Laufzeit.
+  - Der Seitentitel lädt nur noch die Tickerliste statt aller Unternehmensdaten.
+
+**TESTED**
+- Python: 169 Tests grün, davon 9 neu. Geprüft werden:
+  - wachsende Kaufgruppe;
+  - Berichtigung (einzeln, zusammen mit dem Original, in einer Kaufgruppe);
+  - Eingangszeit und Prüfsumme (auch Version 1.0);
+  - unveränderliche Verknüpfungen;
+  - Filter, Verknüpfungen und Lücken in der API.
+- `ruff` und `mypy` ohne Befund.
+- Website: 196 Tests grün, davon 16 neu für Kursverlauf, Zeitleiste, Status, Filter und Zwischenspeicher. Typprüfung ohne Befund, ESLint unverändert (5 Altfehler), Build erfolgreich, auch mit Kursschlüssel.
+- **End-to-End lokal** (echtes Postgres, echte FastAPI, Next.js-Produktionsbuild; SEC und Twelve Data **nachgebildet mit fiktiver Testfirma, nur für die Prüfung**):
+  - Ablauf: Einzelkauf, dann Kaufgruppe aus 2, dann aus 3 Personen, dann Berichtigung. Ergebnis sind 5 Archivmeldungen mit korrekten Verknüpfungen und Status.
+  - Kursverlauf mit „noch nicht erreicht“.
+  - Leere Filterergebnisse, ungültige ID, unbekannte ID, „Bot nicht erreichbar“.
+  - Desktop und Smartphone, hell und dunkel, ohne JavaScript-Fehler.
+
+**Grenzen**
+- Mit echten SEC-Daten ist das erst auf dem Mac prüfbar (`./bot-lokal.sh pruefen`).
+- Wächst eine Kaufgruppe um einen Kauf **vor** ihrem bisherigen Beginn, entsteht eine neue Kaufgruppe ohne Verknüpfung.
+- Eine unbekannte Meldungs-ID liefert die Hinweisseite mit HTTP-Status 200 statt 404. Das ist eine Eigenheit von Next.js bei Ladeanzeigen; der Inhalt ist korrekt.
+- Kursdaten: Twelve Data nur für private Nutzung. Ob Kurse um Splits und Dividenden bereinigt sind, ist nicht geprüft.
+
+**NEXT**
+- Etappe C: „Was hat sich verändert?“ für die Watchlist und das Thesen-Tagebuch mit manuellen Kriterien, Versionen und Export/Import.
+- Dazu die Neuordnung der Aktienseite.
